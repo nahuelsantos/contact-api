@@ -18,8 +18,37 @@ type Request struct {
 	HTML    bool   `json:"html"`
 }
 
+// EmailService defines the operations for sending emails
+type EmailService interface {
+	Send(req Request, cfg config.Config) error
+}
+
+// SMTPDialer is a function type for creating SMTP clients
+type SMTPDialer func(addr string) (SMTPClient, error)
+
+// defaultSMTPDialFn is the standard implementation of SMTPDialer
+func defaultSMTPDialFn(addr string) (SMTPClient, error) {
+	return smtp.Dial(addr)
+}
+
+// DefaultSMTPDialer is the default dialer that can be replaced for testing
+var DefaultSMTPDialer SMTPDialer = defaultSMTPDialFn
+
+// Service implements the EmailService interface
+type Service struct {
+	smtpDialer SMTPDialer
+}
+
+// NewService creates a new email service with the given SMTP dialer
+func NewService(dialer SMTPDialer) *Service {
+	if dialer == nil {
+		dialer = DefaultSMTPDialer
+	}
+	return &Service{smtpDialer: dialer}
+}
+
 // Send handles sending an email using the configured SMTP server
-func Send(req Request, cfg config.Config) error {
+func (s *Service) Send(req Request, cfg config.Config) error {
 	// If From field is empty, use default
 	if req.From == "" {
 		req.From = cfg.DefaultFrom
@@ -52,7 +81,7 @@ func Send(req Request, cfg config.Config) error {
 	log.Printf("Attempting to send email via SMTP server: %s", addr)
 
 	// Create client with TLS disabled
-	client, err := smtp.Dial(addr)
+	client, err := s.smtpDialer(addr)
 	if err != nil {
 		log.Printf("SMTP connection error: %v", err)
 		return fmt.Errorf("SMTP connection error: %w", err)
@@ -95,4 +124,11 @@ func Send(req Request, cfg config.Config) error {
 
 	log.Printf("Email sent successfully to %s", req.To)
 	return nil
+}
+
+// Send is a package-level function that uses the default email service
+// This is for backward compatibility
+func Send(req Request, cfg config.Config) error {
+	service := NewService(DefaultSMTPDialer)
+	return service.Send(req, cfg)
 }
