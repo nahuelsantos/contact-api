@@ -150,6 +150,38 @@ make lint
 make lint-fix
 ```
 
+## CI/CD Pipeline
+
+The project includes an automated CI/CD pipeline using GitHub Actions:
+
+### Pull Request Workflow
+When a pull request is opened against the `main` branch:
+- Linting is performed
+- All tests are run with race condition detection
+- Code coverage is calculated and reported
+
+### Main Branch Workflow
+When changes are merged to the `main` branch:
+- A new version is automatically determined using semantic versioning (patch by default)
+- A new GitHub release is created with release notes
+- A Docker image is built and published to GitHub Container Registry (ghcr.io)
+- The Docker image is tagged with:
+  - The full semantic version (e.g., `v1.2.3`)
+  - The major.minor version (e.g., `v1.2`)
+  - `latest` tag
+
+### Using the Docker Image
+
+The Docker image is available at:
+```
+ghcr.io/nahuelsantos/mail-api:latest
+```
+
+To use a specific version:
+```bash
+docker pull ghcr.io/nahuelsantos/mail-api:v1.2.3
+```
+
 ## Status Badges
 
 The project uses [Shields.io](https://shields.io/) badges to provide quick insights:
