@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  mail-api:
+    image: ghcr.io/nahuelsantos/mail-api:latest
+    container_name: mail-api
+    restart: unless-stopped
+    ports:
+      - "20001:20001"
+    environment:
+      - SMTP_HOST=${SMTP_HOST:-mail-server}
+      - SMTP_PORT=${SMTP_PORT:-25}
+      - DEFAULT_FROM=${DEFAULT_FROM:-noreply@example.com}
+      - DEFAULT_TO=${DEFAULT_TO:-admin@example.com}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,example.com}
+      - PORT=20001
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:20001/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - mail-network
+
+  # Optional SMTP server for development (comment out in production)
+  mail-server:
+    image: mailhog/mailhog:latest
+    container_name: mail-server
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP port
+      - "8025:8025" # Web UI
+    networks:
+      - mail-network
+
+networks:
+  mail-network:
+    driver: bridge

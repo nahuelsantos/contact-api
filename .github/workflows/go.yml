@@ -101,6 +101,10 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.title=mail-api
+            org.opencontainers.image.description=Simple mail api for contact forms
+            org.opencontainers.image.licenses=MIT
           tags: |
             type=semver,pattern={{version}},value=${{ steps.tag_version.outputs.new_tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.tag_version.outputs.new_tag }}
@@ -112,5 +116,14 @@ jobs:
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }} 
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.tag_version.outputs.new_tag }} 

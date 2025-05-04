@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  mail-api:
+    image: ${REGISTRY:-ghcr.io}/${REPOSITORY:-nahuelsantos/mail-api}:${MAIL_API_VERSION:-latest}
+    container_name: mail-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-20001}:20001"
+    environment:
+      - SMTP_HOST=${SMTP_HOST:-mail-server}
+      - SMTP_PORT=${SMTP_PORT:-25}
+      - DEFAULT_FROM=${DEFAULT_FROM:-noreply@example.com}
+      - DEFAULT_TO=${DEFAULT_TO:-admin@example.com}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,example.com}
+      - PORT=20001
+    volumes:
+      - ${LOG_PATH:-./logs}:/app/logs
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:20001/health" ]
+      interval: ${HEALTH_CHECK_INTERVAL:-30s}
+      timeout: ${HEALTH_CHECK_TIMEOUT:-10s}
+      retries: ${HEALTH_CHECK_RETRIES:-3}
+      start_period: ${HEALTH_CHECK_START_PERIOD:-10s}
+    networks:
+      - mail-network
+    labels:
+      - "traefik.enable=${TRAEFIK_ENABLE:-false}"
+      - "traefik.http.routers.mail-api.rule=Host(`${API_DOMAIN:-mail-api.example.com}`)"
+      - "traefik.http.routers.mail-api.entrypoints=websecure"
+      - "traefik.http.routers.mail-api.tls.certresolver=myresolver"
+      - "traefik.http.services.mail-api.loadbalancer.server.port=20001"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-3}"
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT:-0.5}'
+          memory: ${MEMORY_LIMIT:-256M}
+        reservations:
+          cpus: '${CPU_RESERVATION:-0.1}'
+          memory: ${MEMORY_RESERVATION:-128M}
+
+  # Optional SMTP server for development (comment out in production)
+  mail-server:
+    image: ${MAILHOG_IMAGE:-mailhog/mailhog:latest}
+    container_name: mail-server
+    restart: unless-stopped
+    ports:
+      - "${SMTP_UI_PORT:-1025}:1025" # SMTP port
+      - "${MAILHOG_UI_PORT:-8025}:8025" # Web UI
+    networks:
+      - mail-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-3}"
+    volumes:
+      - mailhog-data:/maildir
+    deploy:
+      resources:
+        limits:
+          cpus: '${MAILHOG_CPU_LIMIT:-0.3}'
+          memory: ${MAILHOG_MEMORY_LIMIT:-128M}
+
+  # Optional traefik for HTTPS and domain routing
+  traefik:
+    image: ${TRAEFIK_IMAGE:-traefik:v2.9}
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command:
+      - "--api.insecure=false"
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge=true"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.myresolver.acme.email=${LETS_ENCRYPT_EMAIL:-admin@example.com}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-data:/letsencrypt
+    networks:
+      - mail-network
+    deploy:
+      resources:
+        limits:
+          cpus: '${TRAEFIK_CPU_LIMIT:-0.3}'
+          memory: ${TRAEFIK_MEMORY_LIMIT:-128M}
+
+networks:
+  mail-network:
+    driver: bridge
+
+volumes:
+  mailhog-data:
+  traefik-data:

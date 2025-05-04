@@ -222,6 +222,30 @@ make docker-build
 make docker-run
 ```
 
+## Docker Deployment
+
+The mail-api is available as a Docker image on GitHub Container Registry:
+
+```bash
+ghcr.io/nahuelsantos/mail-api:latest
+```
+
+### Quick Start with Docker
+
+```bash
+docker run -p 20001:20001 \
+  -e SMTP_HOST=your-smtp-server \
+  -e DEFAULT_FROM=noreply@yourdomain.com \
+  -e DEFAULT_TO=admin@yourdomain.com \
+  ghcr.io/nahuelsantos/mail-api:latest
+```
+
+### Using Docker Compose
+
+We provide two Docker Compose configurations:
+- `docker-compose.yml` - Basic configuration with Mail API and MailHog for development
+- `docker-compose.advanced.yml` - Advanced configuration with resource limits, log rotation, and Traefik for HTTPS
+
 ## Environment Variables
 
 Copy `.env.example` to `.env` and adjust the values as needed:
