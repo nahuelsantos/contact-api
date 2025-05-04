@@ -13,6 +13,8 @@
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+coverage.out
+coverage.html
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
@@ -23,3 +25,19 @@ go.work.sum
 
 # env file
 .env
+
+# Binary directory
+/bin/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Debug logs
+*.log

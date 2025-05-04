@@ -1,0 +1,61 @@
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - gosec
+    - goimports
+    - misspell
+    - revive
+    - gofmt
+  disable:
+    - gochecknoglobals
+    - wsl
+  presets:
+    - bugs
+    - unused
+  fast: false
+
+linters-settings:
+  govet:
+    # Deprecated: check-shadowing has been removed. Use shadow linter instead
+    # check-shadowing: true
+  revive:
+    rules:
+      - name: exported
+        disabled: false
+        severity: warning
+        arguments:
+          - "checkPrivateReceivers"
+          - "sayRepetitiveInsteadOfStutters"
+  gocyclo:
+    min-complexity: 15
+  maligned:
+    suggest-new: true
+  depguard:
+    list-type: blacklist
+  misspell:
+    locale: US
+    ignore-words:
+      - someword
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - gosec
+  exclude-dirs:
+    - vendor/ 
+  max-same-issues: 0
+  max-issues-per-linter: 0
+
+run:
+  timeout: 5m
+  # Deprecated: skip-dirs is deprecated, use exclude-dirs in the issues section
+  # skip-dirs:
+  #   - vendor/
