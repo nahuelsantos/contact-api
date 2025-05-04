@@ -1,30 +1,15 @@
 # Mail API
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/nahuelsantos/mail-api)](https://github.com/nahuelsantos/mail-api)
-[![License](https://img.shields.io/github/license/nahuelsantos/mail-api)](https://github.com/nahuelsantos/mail-api/blob/main/LICENSE)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/nahuelsantos/mail-api/go.yml?branch=main)](https://github.com/nahuelsantos/mail-api/actions)
-[![Coverage Status](https://byob.yarr.is/nahuelsantos/mail-api/coverage)](https://github.com/nahuelsantos/mail-api/actions/workflows/badges.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/nahuelsantos/mail-api)](https://goreportcard.com/report/github.com/nahuelsantos/mail-api)
-[![Last Commit](https://img.shields.io/github/last-commit/nahuelsantos/mail-api)](https://github.com/nahuelsantos/mail-api/commits/main)
-[![Open Issues](https://img.shields.io/github/issues/nahuelsantos/mail-api)](https://github.com/nahuelsantos/mail-api/issues)
-[![Pull Requests](https://img.shields.io/github/issues-pr/nahuelsantos/mail-api)](https://github.com/nahuelsantos/mail-api/pulls)
-[![API Status](https://img.shields.io/badge/API-Active-brightgreen)](https://github.com/nahuelsantos/mail-api)
-[![Test Status](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/nahuelsantos/mail-api/actions)
-[![SMTP Support](https://img.shields.io/badge/SMTP-Enabled-blue)](https://github.com/nahuelsantos/mail-api)
-[![HTML Emails](https://img.shields.io/badge/HTML_Emails-Supported-blue)](https://github.com/nahuelsantos/mail-api)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue)](https://github.com/nahuelsantos/mail-api/blob/main/Dockerfile)
-
-<div align="center">
-  <a href="https://github.com/nahuelsantos/mail-api">
-    <img src="https://img.shields.io/badge/Mail-API-blue?style=for-the-badge&logo=mail&logoColor=white" alt="Mail API" />
-  </a>
-  <a href="https://github.com/nahuelsantos/mail-api/actions">
-    <img src="https://img.shields.io/badge/CI/CD-Automated-43a047?style=for-the-badge&logo=github-actions&logoColor=white" alt="CI/CD" />
-  </a>
-  <a href="https://github.com/nahuelsantos/mail-api/blob/main/Dockerfile">
-    <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
-  </a>
-</div>
+[![Go Version](https://img.shields.io/github/go-mod/go-version/nahuelsantos/mail-api?logo=go&logoColor=white&style=for-the-badge)](https://github.com/nahuelsantos/mail-api)
+[![License](https://img.shields.io/github/license/nahuelsantos/mail-api?style=for-the-badge)](https://github.com/nahuelsantos/mail-api/blob/main/LICENSE)
+[![Release](https://img.shields.io/github/v/release/nahuelsantos/mail-api?include_prereleases&style=for-the-badge)](https://github.com/nahuelsantos/mail-api/releases)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/nahuelsantos/mail-api/go.yml?branch=main&style=for-the-badge)](https://github.com/nahuelsantos/mail-api/actions)
+[![Last Commit](https://img.shields.io/github/last-commit/nahuelsantos/mail-api?style=for-the-badge)](https://github.com/nahuelsantos/mail-api/commits/main)
+[![Open Issues](https://img.shields.io/github/issues/nahuelsantos/mail-api?style=for-the-badge)](https://github.com/nahuelsantos/mail-api/issues)
+[![Pull Requests](https://img.shields.io/github/issues-pr/nahuelsantos/mail-api?style=for-the-badge)](https://github.com/nahuelsantos/mail-api/pulls)
+[![Test Status](https://img.shields.io/badge/tests-passing-brightgreen?style=for-the-badge)](https://github.com/nahuelsantos/mail-api/actions)
+[![CI/CD](https://img.shields.io/badge/CI/CD-Automated-43a047?logo=github-actions&logoColor=white&style=for-the-badge)](https://github.com/nahuelsantos/mail-api/actions)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white&style=for-the-badge)](https://github.com/nahuelsantos/mail-api/blob/main/Dockerfile)
 
 A simple REST API for sending emails via SMTP.
 
@@ -165,78 +150,20 @@ make lint
 make lint-fix
 ```
 
-## Badges
+## Status Badges
 
-The project uses [Shields.io](https://shields.io/) for status badges in the README. Most badges update automatically based on repository activity.
+The project uses [Shields.io](https://shields.io/) badges to provide quick insights:
 
-### Setting Up Dynamic Coverage Badge
-
-We use two methods to generate a dynamic coverage badge that updates with your actual test coverage:
-
-#### Method 1: GitHub Gist
-
-1. **Create a GitHub Gist**:
-   - Go to [https://gist.github.com/](https://gist.github.com/)
-   - Create a new public gist with file named `mail-api-coverage.json`
-   - Initial content: `{"schemaVersion": 1, "label": "coverage", "message": "0%", "color": "red"}`
-
-2. **Create a Personal Access Token**:
-   - Go to [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens)
-   - Generate a new token with the `gist` scope
-   - Copy the token immediately
-
-3. **Add Repository Secrets**:
-   - Go to your repository's Settings > Secrets and variables > Actions
-   - Add a new repository secret named `GIST_ID` with your gist ID (the alphanumeric part from the gist URL)
-   - Add another secret named `GIST_SECRET` with your personal access token
-
-4. **Use the Badge in README**:
-   ```markdown
-   [![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/YOUR_USERNAME/YOUR_GIST_ID/raw/mail-api-coverage.json)](https://github.com/nahuelsantos/mail-api)
-   ```
-
-#### Method 2: BYOB Badges
-
-We also use [BYOB (Bring Your Own Badge)](https://github.com/RubbaBoy/BYOB) as a fallback. This requires no additional setup as it uses your standard GitHub token.
-
-The badge is available at:
-```
-https://byob.yarr.is/nahuelsantos/mail-api/coverage
-```
-
-### Static Badges
-
-Custom static badges can be created using:
-
-```
-https://img.shields.io/badge/<LABEL>-<MESSAGE>-<COLOR>
-```
-
-Example:
-```
-https://img.shields.io/badge/API-Active-brightgreen
-```
-
-### Badge Maintenance
-
-- **Dynamic badges** (build, coverage, issues, etc.) update automatically
-- **Static badges** (API status, SMTP Support, etc.) should be updated manually as features change
-- To update static badges, edit the URLs in the README.md file
-- Common colors include: `brightgreen`, `green`, `yellowgreen`, `yellow`, `orange`, `red`, `blue`, `lightgrey`
-
-### Additional Badge Options
-
-Shields.io badges support additional parameters:
-
-- Style: `?style=flat-square`, `?style=plastic`, `?style=for-the-badge`
-- Logo: `?logo=go`, `?logo=docker`
-- Logo Color: `?logoColor=white`
-- Label Color: `?labelColor=abcdef`
-
-Example with styling:
-```
-https://img.shields.io/badge/API-Active-brightgreen?style=for-the-badge&logo=go&logoColor=white
-```
+- **Go Version**: Shows the Go version used in the project
+- **License**: Displays the project's license type
+- **Release**: Shows the latest release version
+- **Build Status**: Indicates whether the CI pipeline is passing
+- **Last Commit**: Shows when the last commit was made
+- **Open Issues**: Displays the number of open issues
+- **Pull Requests**: Shows the number of open pull requests
+- **Test Status**: Shows whether the tests are passing
+- **CI/CD**: Indicates that CI/CD is automated using GitHub Actions
+- **Docker**: Indicates that the project is containerized with Docker
 
 ## Building and Running
 
@@ -270,21 +197,3 @@ Copy `.env.example` to `.env` and adjust the values as needed:
 ```bash
 cp .env.example .env
 ```
-
-## Status Badges
-
-The project uses [Shields.io](https://shields.io/) badges to provide quick insights:
-
-- **Go Version**: Shows the Go version used in the project
-- **License**: Displays the project's license type
-- **Build Status**: Indicates whether the CI pipeline is passing
-- **Coverage Status**: Shows the percentage of code covered by tests
-- **Go Report Card**: Rates the code quality based on various Go best practices
-- **Last Commit**: Shows when the last commit was made
-- **Open Issues**: Displays the number of open issues
-- **Pull Requests**: Shows the number of open pull requests
-- **API Status**: Indicates whether the API service is active
-- **Test Status**: Shows whether the tests are passing
-- **SMTP Support**: Indicates that SMTP is enabled for sending emails
-- **HTML Emails**: Shows that HTML email format is supported
-- **Docker**: Indicates that the project is containerized with Docker
