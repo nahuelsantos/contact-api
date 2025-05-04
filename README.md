@@ -2,8 +2,8 @@
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/nahuelsantos/mail-api)](https://github.com/nahuelsantos/mail-api)
 [![License](https://img.shields.io/github/license/nahuelsantos/mail-api)](https://github.com/nahuelsantos/mail-api/blob/main/LICENSE)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/nahuelsantos/mail-api/build.yml?branch=main)](https://github.com/nahuelsantos/mail-api/actions)
-[![Code Coverage](https://img.shields.io/codecov/c/github/nahuelsantos/mail-api)](https://codecov.io/gh/nahuelsantos/mail-api)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/nahuelsantos/mail-api/go.yml?branch=main)](https://github.com/nahuelsantos/mail-api/actions)
+[![Coverage Status](https://byob.yarr.is/nahuelsantos/mail-api/coverage)](https://github.com/nahuelsantos/mail-api/actions/workflows/badges.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/nahuelsantos/mail-api)](https://goreportcard.com/report/github.com/nahuelsantos/mail-api)
 [![Last Commit](https://img.shields.io/github/last-commit/nahuelsantos/mail-api)](https://github.com/nahuelsantos/mail-api/commits/main)
 [![Open Issues](https://img.shields.io/github/issues/nahuelsantos/mail-api)](https://github.com/nahuelsantos/mail-api/issues)
@@ -167,13 +167,44 @@ make lint-fix
 
 ## Badges
 
-The project uses [Shields.io](https://shields.io/) for status badges in the README. Most badges update automatically based on repository activity. To set up the dynamic coverage badge:
+The project uses [Shields.io](https://shields.io/) for status badges in the README. Most badges update automatically based on repository activity.
 
-1. Create a new [GitHub Gist](https://gist.github.com/)
-2. Note the Gist ID from the URL
-3. Create a GitHub token with `gist` scope
-4. Add the token as a repository secret named `GIST_SECRET`
-5. Update the `gistID` field in `.github/workflows/badges.yml` with your Gist ID
+### Setting Up Dynamic Coverage Badge
+
+We use two methods to generate a dynamic coverage badge that updates with your actual test coverage:
+
+#### Method 1: GitHub Gist
+
+1. **Create a GitHub Gist**:
+   - Go to [https://gist.github.com/](https://gist.github.com/)
+   - Create a new public gist with file named `mail-api-coverage.json`
+   - Initial content: `{"schemaVersion": 1, "label": "coverage", "message": "0%", "color": "red"}`
+
+2. **Create a Personal Access Token**:
+   - Go to [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens)
+   - Generate a new token with the `gist` scope
+   - Copy the token immediately
+
+3. **Add Repository Secrets**:
+   - Go to your repository's Settings > Secrets and variables > Actions
+   - Add a new repository secret named `GIST_ID` with your gist ID (the alphanumeric part from the gist URL)
+   - Add another secret named `GIST_SECRET` with your personal access token
+
+4. **Use the Badge in README**:
+   ```markdown
+   [![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/YOUR_USERNAME/YOUR_GIST_ID/raw/mail-api-coverage.json)](https://github.com/nahuelsantos/mail-api)
+   ```
+
+#### Method 2: BYOB Badges
+
+We also use [BYOB (Bring Your Own Badge)](https://github.com/RubbaBoy/BYOB) as a fallback. This requires no additional setup as it uses your standard GitHub token.
+
+The badge is available at:
+```
+https://byob.yarr.is/nahuelsantos/mail-api/coverage
+```
+
+### Static Badges
 
 Custom static badges can be created using:
 
@@ -247,7 +278,7 @@ The project uses [Shields.io](https://shields.io/) badges to provide quick insig
 - **Go Version**: Shows the Go version used in the project
 - **License**: Displays the project's license type
 - **Build Status**: Indicates whether the CI pipeline is passing
-- **Code Coverage**: Shows the percentage of code covered by tests
+- **Coverage Status**: Shows the percentage of code covered by tests
 - **Go Report Card**: Rates the code quality based on various Go best practices
 - **Last Commit**: Shows when the last commit was made
 - **Open Issues**: Displays the number of open issues

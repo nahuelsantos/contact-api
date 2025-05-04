@@ -31,16 +31,40 @@ jobs:
         run: |
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
+          echo "Current coverage: $COVERAGE%"
 
-      - name: Create coverage badge
-        uses: schneegans/dynamic-badges-action@v1.6.0
+      # Method 1: Use direct GitHub API to update the gist
+      - name: Update coverage gist
+        env:
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GITHUB_TOKEN: ${{ secrets.GIST_SECRET }}
+        run: |
+          # Create JSON payload for the gist content
+          cat > coverage.json << EOF
+          {
+            "schemaVersion": 1,
+            "label": "coverage",
+            "message": "${{ env.COVERAGE }}%",
+            "color": "${{ env.COVERAGE >= 80 && 'green' || env.COVERAGE >= 70 && 'yellow' || 'red' }}"
+          }
+          EOF
+          
+          # Update the gist
+          curl -X PATCH \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"files\":{\"mail-api-coverage.json\":{\"content\":$(cat coverage.json | jq -R -s .)}}" \
+            "https://api.github.com/gists/$GIST_ID"
+
+      # Method 2: Use a simpler action as fallback
+      - name: Create simple coverage badge
+        uses: RubbaBoy/BYOB@v1.3.0
         with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: fff8e6891c5832b598576da027fc1c3c # You'll need to create a gist and put its ID here
-          filename: mail-api-coverage.json
-          label: Coverage
-          message: ${{ env.COVERAGE }}%
-          color: ${{ env.COVERAGE >= 80 && 'green' || env.COVERAGE >= 70 && 'yellow' || 'red' }}
+          NAME: coverage
+          LABEL: 'coverage'
+          STATUS: '${{ env.COVERAGE }}%'
+          COLOR: ${{ env.COVERAGE >= 80 && '5cb85c' || env.COVERAGE >= 70 && 'f0ad4e' || 'e05d44' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Go Report Card badge
         uses: creekorful/goreportcard-action@v1.0 
