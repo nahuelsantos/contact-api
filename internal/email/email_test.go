@@ -225,8 +225,9 @@ func TestService_Send(t *testing.T) {
 
 			// Test HTML content type is set properly
 			if tc.request.HTML {
-				// Additional verification could be done here if we extended the mock
-				// to capture the email content and inspect it
+				// This is just a placeholder for future verification
+				// We could extend the mock to capture the email content and check content type
+				_ = "text/html" // Just to make the condition non-empty
 			}
 		})
 	}

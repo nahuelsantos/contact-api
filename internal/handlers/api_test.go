@@ -13,7 +13,7 @@ import (
 	"github.com/nahuelsantos/mail-api/internal/email"
 )
 
-// MockEmailService is a mock implementation of the email.EmailService interface
+// MockEmailService is a mock implementation of the email.Service interface
 type MockEmailService struct {
 	SendFunc func(req email.Request, cfg config.Config) error
 }

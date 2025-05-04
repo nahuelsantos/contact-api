@@ -18,8 +18,8 @@ type Request struct {
 	HTML    bool   `json:"html"`
 }
 
-// EmailService defines the operations for sending emails
-type EmailService interface {
+// Service defines the operations for sending emails
+type Service interface {
 	Send(req Request, cfg config.Config) error
 }
 
@@ -34,21 +34,21 @@ func defaultSMTPDialFn(addr string) (SMTPClient, error) {
 // DefaultSMTPDialer is the default dialer that can be replaced for testing
 var DefaultSMTPDialer SMTPDialer = defaultSMTPDialFn
 
-// Service implements the EmailService interface
-type Service struct {
+// ServiceImpl implements the Service interface
+type ServiceImpl struct {
 	smtpDialer SMTPDialer
 }
 
 // NewService creates a new email service with the given SMTP dialer
-func NewService(dialer SMTPDialer) *Service {
+func NewService(dialer SMTPDialer) *ServiceImpl {
 	if dialer == nil {
 		dialer = DefaultSMTPDialer
 	}
-	return &Service{smtpDialer: dialer}
+	return &ServiceImpl{smtpDialer: dialer}
 }
 
 // Send handles sending an email using the configured SMTP server
-func (s *Service) Send(req Request, cfg config.Config) error {
+func (s *ServiceImpl) Send(req Request, cfg config.Config) error {
 	// If From field is empty, use default
 	if req.From == "" {
 		req.From = cfg.DefaultFrom
