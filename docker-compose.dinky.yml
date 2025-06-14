@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   contact-api:
-    image: ghcr.io/nahuelsantos/contact-api:latest
+    image: ghcr.io/nahuelsantos/contact-api:v0.0.1
     container_name: contact-api
     restart: unless-stopped
     ports:
@@ -19,24 +17,18 @@ services:
     networks:
       - traefik_network
     labels:
-      # Traefik configuration
-      - "traefik.enable=true"
-      - "traefik.http.routers.contact-api.rule=Host(`contact-api.nahuelsantos.com`)"
-      - "traefik.http.routers.contact-api.entrypoints=websecure"
-      - "traefik.http.routers.contact-api.tls.certresolver=myresolver"
-      - "traefik.http.services.contact-api.loadbalancer.server.port=3002"
       # Prometheus monitoring
       - "prometheus.scrape=true"
       - "prometheus.port=3002"
       - "prometheus.job=contact-api"
-    depends_on:
+    external_links:
       - mail-server
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-
+    
 networks:
   traefik_network:
     external: true 

@@ -15,6 +15,7 @@ import (
 	"github.com/nahuelsantos/contact-api/internal/config"
 	"github.com/nahuelsantos/contact-api/internal/handlers"
 	"github.com/nahuelsantos/contact-api/internal/observability"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
@@ -84,6 +85,7 @@ func Run() {
 
 	// Global routes
 	r.GET("/health", api.HealthCheck)
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Get port from environment variable or use default
