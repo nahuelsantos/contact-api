@@ -42,3 +42,4 @@ Thumbs.db
 
 # Debug logs
 *.log
+*.py

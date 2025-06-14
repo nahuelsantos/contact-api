@@ -46,7 +46,7 @@ document.getElementById('contact-form').addEventListener('submit', async (e) => 
   const formData = new FormData(e.target);
   const data = Object.fromEntries(formData);
   
-  const response = await fetch('http://your-api-domain/api/v1/contact/main', {
+  const response = await fetch('http://your-api-domain/api/v1/contact/{website}', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
