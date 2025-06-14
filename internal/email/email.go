@@ -6,7 +6,7 @@ import (
 	"net/smtp"
 	"time"
 
-	"github.com/nahuelsantos/mail-api/internal/config"
+	"github.com/nahuelsantos/contact-api/internal/config"
 )
 
 // Request represents an incoming request to send an email

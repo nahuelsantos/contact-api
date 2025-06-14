@@ -32,6 +32,7 @@ go.work.sum
 # IDE specific files
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 

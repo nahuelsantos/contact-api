@@ -1,12 +1,12 @@
 version: '3.8'
 
 services:
-  mail-api:
-    image: ${REGISTRY:-ghcr.io}/${REPOSITORY:-nahuelsantos/mail-api}:${MAIL_API_VERSION:-latest}
-    container_name: mail-api
+  contact-api:
+    image: ${REGISTRY:-ghcr.io}/${REPOSITORY:-nahuelsantos/contact-api}:${CONTACT_API_VERSION:-latest}
+    container_name: contact-api
     restart: unless-stopped
     ports:
-      - "${API_PORT:-20001}:20001"
+      - "${API_PORT:-3002}:3002"
     environment:
       - SMTP_HOST=${SMTP_HOST:-mail-server}
       - SMTP_PORT=${SMTP_PORT:-25}
@@ -26,10 +26,10 @@ services:
       - mail-network
     labels:
       - "traefik.enable=${TRAEFIK_ENABLE:-false}"
-      - "traefik.http.routers.mail-api.rule=Host(`${API_DOMAIN:-mail-api.example.com}`)"
-      - "traefik.http.routers.mail-api.entrypoints=websecure"
-      - "traefik.http.routers.mail-api.tls.certresolver=myresolver"
-      - "traefik.http.services.mail-api.loadbalancer.server.port=20001"
+      - "traefik.http.routers.contact-api.rule=Host(`${API_DOMAIN:-contact-api.example.com}`)"
+      - "traefik.http.routers.contact-api.entrypoints=websecure"
+      - "traefik.http.routers.contact-api.tls.certresolver=myresolver"
+      - "traefik.http.services.contact-api.loadbalancer.server.port=3002"
     logging:
       driver: "json-file"
       options:

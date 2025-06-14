@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  contact-api:
+    image: ghcr.io/nahuelsantos/contact-api:latest
+    container_name: contact-api
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      # Your mail server configuration
+      - SMTP_HOST=mail-server
+      - SMTP_PORT=25
+      - DEFAULT_FROM=hi@nahuelsantos.com
+      - DEFAULT_TO=nahuelsantos@gmail.com
+      - GIN_MODE=release
+      # Optional: OpenTelemetry
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+    networks:
+      - traefik_network
+    labels:
+      # Traefik configuration
+      - "traefik.enable=true"
+      - "traefik.http.routers.contact-api.rule=Host(`contact-api.nahuelsantos.com`)"
+      - "traefik.http.routers.contact-api.entrypoints=websecure"
+      - "traefik.http.routers.contact-api.tls.certresolver=myresolver"
+      - "traefik.http.services.contact-api.loadbalancer.server.port=3002"
+      # Prometheus monitoring
+      - "prometheus.scrape=true"
+      - "prometheus.port=3002"
+      - "prometheus.job=contact-api"
+    depends_on:
+      - mail-server
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  traefik_network:
+    external: true 

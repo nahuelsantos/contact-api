@@ -1,12 +1,12 @@
 version: '3.8'
 
 services:
-  mail-api:
-    image: ghcr.io/nahuelsantos/mail-api:latest
-    container_name: mail-api
+  contact-api:
+    image: ghcr.io/nahuelsantos/contact-api:latest
+    container_name: contact-api
     restart: unless-stopped
     ports:
-      - "20001:20001"
+      - "3002:3002"
     environment:
       - SMTP_HOST=${SMTP_HOST:-mail-server}
       - SMTP_PORT=${SMTP_PORT:-25}

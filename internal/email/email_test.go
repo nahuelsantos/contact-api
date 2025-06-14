@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/nahuelsantos/mail-api/internal/config"
+	"github.com/nahuelsantos/contact-api/internal/config"
 )
 
 func TestService_Send(t *testing.T) {
