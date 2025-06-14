@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Health check script for mail-api
+# Health check script for contact-api
 
 # Default values
 HOST="localhost"

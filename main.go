@@ -1,7 +1,7 @@
 package main
 
-import mail "github.com/nahuelsantos/mail-api/cmd/mail-api"
+import contact "github.com/nahuelsantos/contact-api/cmd/contact-api"
 
 func main() {
-	mail.Run()
+	contact.Run()
 }

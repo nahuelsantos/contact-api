@@ -1,0 +1,112 @@
+basePath: /api/v1
+definitions:
+  handlers.ContactFormData:
+    properties:
+      email:
+        example: john@example.com
+        type: string
+      message:
+        example: I would like to know more about your services
+        type: string
+      name:
+        example: John Doe
+        type: string
+      subject:
+        example: Inquiry about services
+        type: string
+    required:
+    - email
+    - message
+    - name
+    - subject
+    type: object
+  handlers.Response:
+    properties:
+      data: {}
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
+host: localhost:3002
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: REST API for handling contact form submissions from websites
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: Contact API
+  version: "1.0"
+paths:
+  /contact/{website}:
+    post:
+      consumes:
+      - application/json
+      description: Submit a contact form for a specific website
+      parameters:
+      - description: Website identifier
+        in: path
+        name: website
+        required: true
+        type: string
+      - description: Contact form data
+        in: body
+        name: contact
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ContactFormData'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.Response'
+      summary: Submit contact form
+      tags:
+      - contact
+  /contact/{website}/health:
+    get:
+      description: Check if the contact form is properly configured for a website
+      parameters:
+      - description: Website identifier
+        in: path
+        name: website
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.Response'
+      summary: Health check for website
+      tags:
+      - health
+  /health:
+    get:
+      description: Check if the Contact API service is running
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.Response'
+      summary: Health check
+      tags:
+      - health
+swagger: "2.0"

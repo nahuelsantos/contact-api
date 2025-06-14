@@ -1,27 +1,29 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 
-	"github.com/nahuelsantos/mail-api/internal/config"
-	"github.com/nahuelsantos/mail-api/internal/email"
+	"github.com/gin-gonic/gin"
+	"github.com/nahuelsantos/contact-api/internal/config"
+	"github.com/nahuelsantos/contact-api/internal/email"
+	"go.opentelemetry.io/otel"
 )
 
 // Response represents the API response
 type Response struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // ContactFormData represents a contact form submission
 type ContactFormData struct {
-	Name    string `json:"name"`
-	Email   string `json:"email"`
-	Subject string `json:"subject"`
-	Message string `json:"message"`
+	Name    string `json:"name" binding:"required" example:"John Doe"`
+	Email   string `json:"email" binding:"required,email" example:"john@example.com"`
+	Subject string `json:"subject" binding:"required" example:"Inquiry about services"`
+	Message string `json:"message" binding:"required" example:"I would like to know more about your services"`
 }
 
 // API holds handler dependencies
@@ -36,231 +38,169 @@ func New(cfg config.Config) *API {
 	}
 }
 
-// encodeResponse writes a JSON response and logs any encoding error
-func encodeResponse(w http.ResponseWriter, resp Response) {
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("Error encoding response: %v", err)
-	}
-}
-
 // ContactHandler processes contact form submissions
-func (a *API) ContactHandler(w http.ResponseWriter, r *http.Request) {
-	// Set response content type
-	w.Header().Set("Content-Type", "application/json")
+// @Summary Submit contact form
+// @Description Submit a contact form for a specific website
+// @Tags contact
+// @Accept json
+// @Produce json
+// @Param website path string true "Website identifier" example:"main"
+// @Param contact body ContactFormData true "Contact form data"
+// @Success 200 {object} Response
+// @Failure 400 {object} Response
+// @Failure 500 {object} Response
+// @Router /contact/{website} [post]
+func (a *API) ContactHandler(c *gin.Context) {
+	tracer := otel.Tracer("contact-api")
+	_, span := tracer.Start(c.Request.Context(), "contact.submit")
+	defer span.End()
 
-	// Check if method is POST
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Only POST method is allowed",
-		})
-		return
-	}
+	website := c.Param("website")
 
-	// Limit the size of the request body
-	r.Body = http.MaxBytesReader(w, r.Body, a.Config.MaxBodySize)
-
-	// Decode the request body
 	var contactForm ContactFormData
-	err := json.NewDecoder(r.Body).Decode(&contactForm)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		encodeResponse(w, Response{
+	if err := c.ShouldBindJSON(&contactForm); err != nil {
+		slog.Error("Invalid contact form data", "error", err, "website", website)
+		c.JSON(http.StatusBadRequest, Response{
 			Success: false,
 			Message: "Invalid request format: " + err.Error(),
 		})
 		return
 	}
 
-	// Validate required fields
-	if contactForm.Name == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Name is required",
-		})
-		return
-	}
-
-	if contactForm.Email == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Email is required",
-		})
-		return
-	}
-
-	if contactForm.Subject == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Subject is required",
-		})
-		return
-	}
-
-	if contactForm.Message == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Message is required",
-		})
-		return
-	}
+	// Log contact form submission
+	slog.Info("Contact form submission",
+		"website", website,
+		"email", contactForm.Email,
+		"subject", contactForm.Subject,
+	)
 
 	// Construct email from contact form
 	emailReq := email.Request{
 		From:    contactForm.Email,
-		To:      a.Config.DefaultTo, // Send to the site admin
-		Subject: fmt.Sprintf("Contact Form: %s", contactForm.Subject),
-		Body:    formatContactEmail(contactForm),
+		To:      a.getRecipientForWebsite(website),
+		Subject: fmt.Sprintf("[%s] Contact Form: %s", website, contactForm.Subject),
+		Body:    a.formatContactEmail(contactForm, website),
 		HTML:    true,
 	}
 
 	// Send the email
-	err = email.Send(emailReq, a.Config)
+	err := email.Send(emailReq, a.Config)
 	if err != nil {
-		log.Printf("Error sending contact form email: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		encodeResponse(w, Response{
+		slog.Error("Failed to send contact form email",
+			"error", err,
+			"website", website,
+			"email", contactForm.Email,
+		)
+		c.JSON(http.StatusInternalServerError, Response{
 			Success: false,
 			Message: "Failed to send your message. Please try again later.",
 		})
 		return
 	}
 
-	// Return success response
-	encodeResponse(w, Response{
+	slog.Info("Contact form sent successfully",
+		"website", website,
+		"email", contactForm.Email,
+	)
+
+	c.JSON(http.StatusOK, Response{
 		Success: true,
 		Message: "Your message has been sent successfully! We will get back to you soon.",
 	})
 }
 
+// WebsiteHealthCheck provides a health check for a specific website configuration
+// @Summary Health check for website
+// @Description Check if the contact form is properly configured for a website
+// @Tags health
+// @Produce json
+// @Param website path string true "Website identifier" example:"main"
+// @Success 200 {object} Response
+// @Router /contact/{website}/health [get]
+func (a *API) WebsiteHealthCheck(c *gin.Context) {
+	website := c.Param("website")
+	recipient := a.getRecipientForWebsite(website)
+
+	c.JSON(http.StatusOK, Response{
+		Success: true,
+		Message: "Website contact form is configured",
+		Data: map[string]string{
+			"website":   website,
+			"recipient": recipient,
+			"smtp_host": a.Config.SMTPHost,
+		},
+	})
+}
+
+// HealthCheck provides a simple health check endpoint
+// @Summary Health check
+// @Description Check if the Contact API service is running
+// @Tags health
+// @Produce json
+// @Success 200 {object} Response
+// @Router /health [get]
+func (a *API) HealthCheck(c *gin.Context) {
+	c.JSON(http.StatusOK, Response{
+		Success: true,
+		Message: "Contact API service is running",
+	})
+}
+
+// getRecipientForWebsite returns the email recipient for a specific website
+// This is where future website-specific configuration can be added
+func (a *API) getRecipientForWebsite(_ string) string {
+	// For now, use the default recipient for all websites
+	// In the future, this could look up website-specific recipients from:
+	// - Environment variables (e.g., RECIPIENT_WEBSITE_MAIN)
+	// - Configuration file
+	// - Database
+	return a.Config.DefaultTo
+}
+
 // formatContactEmail formats the contact form data as an HTML email
-func formatContactEmail(form ContactFormData) string {
+func (a *API) formatContactEmail(form ContactFormData, website string) string {
 	return fmt.Sprintf(`
 <!DOCTYPE html>
 <html>
 <head>
     <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; }
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
         .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #f5f5f5; padding: 10px; border-radius: 5px; }
-        .content { margin-top: 20px; }
-        .field { margin-bottom: 10px; }
-        .label { font-weight: bold; }
-        .message { white-space: pre-line; margin-top: 15px; }
+        .header { background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .header h2 { margin: 0; color: #2c3e50; }
+        .website-badge { background-color: #3498db; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .content { background-color: #ffffff; padding: 20px; border: 1px solid #dee2e6; border-radius: 8px; }
+        .field { margin-bottom: 15px; }
+        .label { font-weight: bold; color: #495057; }
+        .value { margin-top: 5px; }
+        .message { background-color: #f8f9fa; padding: 15px; border-radius: 4px; margin-top: 10px; white-space: pre-line; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h2>New Contact Form Submission</h2>
+            <span class="website-badge">%s</span>
         </div>
         <div class="content">
             <div class="field">
-                <span class="label">Name:</span> %s
+                <div class="label">Name:</div>
+                <div class="value">%s</div>
             </div>
             <div class="field">
-                <span class="label">Email:</span> %s
+                <div class="label">Email:</div>
+                <div class="value">%s</div>
             </div>
             <div class="field">
-                <span class="label">Subject:</span> %s
+                <div class="label">Subject:</div>
+                <div class="value">%s</div>
             </div>
             <div class="field">
-                <span class="label">Message:</span>
+                <div class="label">Message:</div>
                 <div class="message">%s</div>
             </div>
         </div>
     </div>
 </body>
-</html>`, form.Name, form.Email, form.Subject, form.Message)
-}
-
-// EmailHandler processes requests to send emails
-func (a *API) EmailHandler(w http.ResponseWriter, r *http.Request) {
-	// Set response content type
-	w.Header().Set("Content-Type", "application/json")
-
-	// Check if method is POST
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Only POST method is allowed",
-		})
-		return
-	}
-
-	// Limit the size of the request body
-	r.Body = http.MaxBytesReader(w, r.Body, a.Config.MaxBodySize)
-
-	// Decode the request body
-	var emailReq email.Request
-	err := json.NewDecoder(r.Body).Decode(&emailReq)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Invalid request format: " + err.Error(),
-		})
-		return
-	}
-
-	// Validate required fields
-	if emailReq.To == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Recipient (to) is required",
-		})
-		return
-	}
-
-	if emailReq.Subject == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Subject is required",
-		})
-		return
-	}
-
-	if emailReq.Body == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Email body is required",
-		})
-		return
-	}
-
-	// Send the email
-	err = email.Send(emailReq, a.Config)
-	if err != nil {
-		log.Printf("Error sending email: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		encodeResponse(w, Response{
-			Success: false,
-			Message: "Failed to send email: " + err.Error(),
-		})
-		return
-	}
-
-	// Return success response
-	encodeResponse(w, Response{
-		Success: true,
-		Message: "Email sent successfully",
-	})
-}
-
-// HealthCheck provides a simple health check endpoint
-func (a *API) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	encodeResponse(w, Response{
-		Success: true,
-		Message: "Mail API service is running",
-	})
+</html>`, website, form.Name, form.Email, form.Subject, form.Message)
 }

@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Git pre-push hook for Contact API
+# This hook runs linting and tests before allowing a push
+
+set -e
+
+echo "🔍 Running pre-push checks..."
+
+# Check if golangci-lint is installed
+if ! command -v golangci-lint &> /dev/null; then
+    echo "❌ golangci-lint is not installed. Please install it first:"
+    echo "   go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+    exit 1
+fi
+
+# Run linting
+echo "🧹 Running linter..."
+if ! golangci-lint run ./...; then
+    echo "❌ Linting failed. Please fix the issues before pushing."
+    exit 1
+fi
+
+# Run tests
+echo "🧪 Running tests..."
+if ! go test -v -race ./...; then
+    echo "❌ Tests failed. Please fix the failing tests before pushing."
+    exit 1
+fi
+
+echo "✅ All checks passed! Proceeding with push..." 

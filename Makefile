@@ -1,99 +1,27 @@
-.PHONY: build clean test run lint lint-fix docker-build docker-run help health-check
+# Contact API Makefile
 
-# Binary name
-BINARY_NAME=mail-api
-VERSION=1.0.0
-BUILD_TIME=$(shell date +%FT%T%z)
-DOCKER_TAG=latest
-
-# Go related variables
-GOBASE=$(shell pwd)
-GOBIN=$(GOBASE)/bin
-GOFILES=$(wildcard *.go)
-
-# Main package path
-MAIN_PACKAGE=.
+.PHONY: help run test start stop
 
 # Default target
-.DEFAULT_GOAL := help
+help: ## Show this help message
+	@echo "Contact API - Available commands:"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 
-## build: Build the application
-build:
-	@echo "Building $(BINARY_NAME)"
-	go build -o $(GOBIN)/$(BINARY_NAME) $(MAIN_PACKAGE)
+run: ## Run the application locally
+	@echo "Starting Contact API on port 3002..."
+	go run cmd/contact-api/main.go
 
-## clean: Clean build files
-clean:
-	@echo "Cleaning"
-	go clean
-	rm -f $(GOBIN)/$(BINARY_NAME)
-
-## test: Run tests
-test:
-	@echo "Testing"
-	go test -v ./...
-
-## cover: Run tests with coverage
-cover:
-	@echo "Testing with coverage"
-	go test -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out
-
-## run: Run the application
-run:
-	@echo "Running $(BINARY_NAME)"
-	go run $(MAIN_PACKAGE)
-
-## lint: Run linter
-lint:
-	@echo "Linting"
+test: ## Run linting and tests
+	@echo "Running linter..."
 	golangci-lint run ./...
+	@echo "Running tests..."
+	go test -v -race ./...
 
-## lint-fix: Run linter with fixing
-lint-fix:
-	@echo "Linting and fixing"
-	golangci-lint run --fix ./...
+start: ## Start with docker-compose
+	@echo "Starting Contact API with Docker..."
+	docker-compose -f docker-compose.dinky.yml up -d
 
-## fmt: Format code
-fmt:
-	@echo "Formatting"
-	go fmt ./...
-
-## vet: Run go vet
-vet:
-	@echo "Vetting"
-	go vet ./...
-
-## docker-build: Build docker image
-docker-build:
-	@echo "Building Docker image"
-	docker build -t $(BINARY_NAME):$(DOCKER_TAG) .
-
-## docker-run: Run docker container
-docker-run:
-	@echo "Running Docker container"
-	docker run -p 20001:20001 --env-file .env $(BINARY_NAME):$(DOCKER_TAG)
-
-## mod-tidy: Tidy and verify go modules
-mod-tidy:
-	@echo "Tidying modules"
-	go mod tidy
-	go mod verify
-
-## install-deps: Install development dependencies
-install-deps:
-	@echo "Installing dev dependencies"
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-## health-check: Run health check against a running instance
-health-check:
-	@echo "Running health check"
-	./scripts/health_check.sh
-
-## all: Clean, build, and test
-all: clean build test
-
-## help: Display help
-help:
-	@echo "Usage: make [target]"
-	@grep -E '^##' Makefile | sed -e 's/## //g' | column -t -s ':' 
+stop: ## Stop docker-compose
+	@echo "Stopping Contact API..."
+	docker-compose -f docker-compose.dinky.yml down 
