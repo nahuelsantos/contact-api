@@ -1,24 +1,19 @@
+version: 2
+
 linters:
-  enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - typecheck
-    - unused
-    - gosec
-    - goimports
-    - misspell
-    - revive
-    - gofmt
   disable:
     - gochecknoglobals
-    - wsl
   presets:
     - bugs
+    - error
     - unused
+    - format
   fast: false
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
 
 linters-settings:
   govet:

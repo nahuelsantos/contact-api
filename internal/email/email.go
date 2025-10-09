@@ -86,7 +86,11 @@ func (s *ServiceImpl) Send(req Request, cfg config.Config) error {
 		log.Printf("SMTP connection error: %v", err)
 		return fmt.Errorf("SMTP connection error: %w", err)
 	}
-	defer client.Close()
+	defer func() {
+		if closeErr := client.Close(); closeErr != nil {
+			log.Printf("Failed to close SMTP client: %v", closeErr)
+		}
+	}()
 
 	// Set the sender and recipient
 	if err = client.Mail(req.From); err != nil {
