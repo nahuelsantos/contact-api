@@ -1,0 +1,62 @@
+services:
+  contact-api:
+    image: ghcr.io/nahuelsantos/contact-api:v0.0.2
+    container_name: contact-api
+    restart: unless-stopped
+    
+    ports:
+      - "3002:3002"
+    
+    mem_limit: 512M
+    cpus: 0.5
+    mem_reservation: 128M
+
+    environment:
+      # Your mail server configuration
+      - SMTP_HOST=mail-server
+      - SMTP_PORT=25
+      - DEFAULT_FROM=hi@nahuelsantos.com
+      - DEFAULT_TO=nahuelsantos@gmail.com
+      - GIN_MODE=release
+      # OpenTelemetry - Use otel-collector instead of direct Tempo connection
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=contact-api
+      - OTEL_SERVICE_VERSION=0.0.2
+    
+    networks:
+      - traefik_network
+    
+    labels:
+      # Traefik configuration
+      - "traefik.enable=true"
+      - "traefik.http.services.contact-api.loadbalancer.server.port=3002"
+      - "traefik.http.routers.contact-api.rule=(Host(`nahuelsantos.com`) || Host(`www.nahuelsantos.com`) || Host(`cv.nahuelsantos.com`)) && PathPrefix(`/api`)"
+      - "traefik.http.routers.contact-api.entrypoints=web"
+      - "traefik.http.routers.contact-api.priority=100"
+      # Loopingbyte specific routing with URL rewrite
+      - "traefik.http.routers.contact-api-loopingbyte.rule=(Host(`loopingbyte.com`) || Host(`www.loopingbyte.com`)) && PathPrefix(`/api/contact`)"
+      - "traefik.http.routers.contact-api-loopingbyte.entrypoints=web"
+      - "traefik.http.routers.contact-api-loopingbyte.priority=110"
+      - "traefik.http.routers.contact-api-loopingbyte.middlewares=loopingbyte-contact-rewrite"
+      - "traefik.http.routers.contact-api-loopingbyte.service=contact-api"
+      # Middleware to rewrite /api/contact to /api/v1/contact/loopingbyte
+      - "traefik.http.middlewares.loopingbyte-contact-rewrite.replacepathregex.regex=^/api/contact(.*)"
+      - "traefik.http.middlewares.loopingbyte-contact-rewrite.replacepathregex.replacement=/api/v1/contact/loopingbyte$$1"
+      # Prometheus monitoring
+      - "prometheus.scrape=true"
+      - "prometheus.port=3002"
+      - "prometheus.job=contact-api"
+      - "prometheus.path=/metrics"
+    
+    external_links:
+      - mail-server
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    
+networks:
+  traefik_network:
+    external: true 
