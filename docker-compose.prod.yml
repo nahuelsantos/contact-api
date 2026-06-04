@@ -19,7 +19,7 @@ services:
       - DEFAULT_TO=nahuelsantos@gmail.com
       - GIN_MODE=release
       # OpenTelemetry - Use otel-collector instead of direct Tempo connection
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://10.10.10.2:4318
       - OTEL_SERVICE_NAME=contact-api
       - OTEL_SERVICE_VERSION=0.0.2
     
