@@ -28,7 +28,11 @@ type SMTPDialer func(addr string) (SMTPClient, error)
 
 // defaultSMTPDialFn is the standard implementation of SMTPDialer
 func defaultSMTPDialFn(addr string) (SMTPClient, error) {
-	return smtp.Dial(addr)
+	client, err := smtp.Dial(addr)
+	if err != nil {
+		return nil, fmt.Errorf("dial smtp %s: %w", addr, err)
+	}
+	return client, nil
 }
 
 // DefaultSMTPDialer is the default dialer that can be replaced for testing
