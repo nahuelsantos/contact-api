@@ -1,61 +1,84 @@
+version: "2"
 linters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - typecheck
-    - unused
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - contextcheck
+    - durationcheck
+    - err113
+    - errchkjson
+    - errorlint
+    - exhaustive
+    - gocheckcompilerdirectives
+    - gochecksumtype
     - gosec
-    - goimports
-    - misspell
-    - revive
-    - gofmt
+    - gosmopolitan
+    - loggercheck
+    - makezero
+    - musttag
+    - nilerr
+    - nilnesserr
+    - noctx
+    - protogetter
+    - reassign
+    - recvcheck
+    - rowserrcheck
+    - spancheck
+    - sqlclosecheck
+    - testifylint
+    - unparam
+    - wrapcheck
+    - zerologlint
   disable:
     - gochecknoglobals
-    - wsl
-  presets:
-    - bugs
-    - unused
-  fast: false
-
-linters-settings:
-  govet:
-    # Deprecated: check-shadowing has been removed. Use shadow linter instead
-    # check-shadowing: true
-  revive:
+  settings:
+    gocyclo:
+      min-complexity: 15
+    misspell:
+      locale: US
+      ignore-rules:
+        - someword
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - checkPrivateReceivers
+            - sayRepetitiveInsteadOfStutters
+          severity: warning
+          disabled: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: exported
-        disabled: false
-        severity: warning
-        arguments:
-          - "checkPrivateReceivers"
-          - "sayRepetitiveInsteadOfStutters"
-  gocyclo:
-    min-complexity: 15
-  maligned:
-    suggest-new: true
-  depguard:
-    list-type: blacklist
-  misspell:
-    locale: US
-    ignore-words:
-      - someword
-
+      - linters:
+          - err113
+          - gocyclo
+          - gosec
+        path: _test\.go
+    paths:
+      - vendor/
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - gosec
-  exclude-dirs:
-    - vendor/ 
-  max-same-issues: 0
   max-issues-per-linter: 0
-
-run:
-  timeout: 5m
-  # Deprecated: skip-dirs is deprecated, use exclude-dirs in the issues section
-  # skip-dirs:
-  #   - vendor/
+  max-same-issues: 0
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - vendor/
+      - third_party$
+      - builtin$
+      - examples$

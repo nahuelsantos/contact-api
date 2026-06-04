@@ -263,7 +263,6 @@ func TestSend(t *testing.T) {
 		SMTPPort:    "25",
 		DefaultFrom: "from@example.com",
 	})
-
 	// Assertions
 	if err != nil {
 		t.Errorf("expected no error but got: %v", err)

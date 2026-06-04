@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -22,7 +23,7 @@ func InitTracing(serviceName string) (func(), error) {
 		),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create otel resource: %w", err)
 	}
 
 	// Check if OTEL_EXPORTER_OTLP_ENDPOINT is set
@@ -36,7 +37,7 @@ func InitTracing(serviceName string) (func(), error) {
 	// Create OTLP HTTP exporter
 	exporter, err := otlptracehttp.New(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create otlp trace exporter: %w", err)
 	}
 
 	// Create tracer provider

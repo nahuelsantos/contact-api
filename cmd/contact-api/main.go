@@ -3,6 +3,7 @@ package contact
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -111,7 +112,7 @@ func Run() {
 			"smtp_port", cfg.SMTPPort,
 		)
 
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("Server error", "error", err)
 			os.Exit(1)
 		}
