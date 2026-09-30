@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nahuelsantos/contact-api/internal/config"
 	"github.com/nahuelsantos/contact-api/internal/email"
+	"github.com/nahuelsantos/contact-api/internal/metrics"
 	"go.opentelemetry.io/otel"
 )
 
@@ -59,6 +61,8 @@ func (a *API) ContactHandler(c *gin.Context) {
 
 	var contactForm ContactFormData
 	if err := c.ShouldBindJSON(&contactForm); err != nil {
+		metrics.Submissions.WithLabelValues(website, "invalid").Inc()
+		metrics.Errors.WithLabelValues(website, "bind").Inc()
 		slog.Error("Invalid contact form data", "error", err, "website", website)
 		c.JSON(http.StatusBadRequest, Response{
 			Success: false,
@@ -74,18 +78,28 @@ func (a *API) ContactHandler(c *gin.Context) {
 		"subject", contactForm.Subject,
 	)
 
-	// Construct email from contact form
+	// Construct email from contact form.
+	//
+	// Envelope sender and From: are the site's own address, never the visitor's:
+	// mail claiming to come from an arbitrary third-party address fails SPF at
+	// the receiving end and gets filed as spam. The visitor goes in Reply-To, so
+	// hitting reply still reaches the person who wrote in.
 	emailReq := email.Request{
-		From:    contactForm.Email,
+		From:    a.Config.DefaultFrom,
 		To:      a.getRecipientForWebsite(website),
 		Subject: fmt.Sprintf("[%s] Contact Form: %s", website, contactForm.Subject),
 		Body:    a.formatContactEmail(contactForm, website),
 		HTML:    true,
+		ReplyTo: contactForm.Email,
 	}
 
 	// Send the email
+	start := time.Now()
 	err := email.Send(emailReq, a.Config)
+	metrics.SendDuration.WithLabelValues(website).Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.Submissions.WithLabelValues(website, "error").Inc()
+		metrics.Errors.WithLabelValues(website, "send").Inc()
 		slog.Error("Failed to send contact form email",
 			"error", err,
 			"website", website,
@@ -98,6 +112,8 @@ func (a *API) ContactHandler(c *gin.Context) {
 		return
 	}
 
+	metrics.Submissions.WithLabelValues(website, "ok").Inc()
+	metrics.LastSuccessTimestamp.WithLabelValues(website).SetToCurrentTime()
 	slog.Info("Contact form sent successfully",
 		"website", website,
 		"email", contactForm.Email,

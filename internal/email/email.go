@@ -16,6 +16,9 @@ type Request struct {
 	Subject string `json:"subject"`
 	Body    string `json:"body"`
 	HTML    bool   `json:"html"`
+	// ReplyTo carries the visitor's address when From is the site's own sender,
+	// so hitting reply still answers the person who filled in the form.
+	ReplyTo string `json:"reply_to"`
 }
 
 // Service defines the operations for sending emails
@@ -58,25 +61,33 @@ func (s *ServiceImpl) Send(req Request, cfg config.Config) error {
 		req.From = cfg.DefaultFrom
 	}
 
-	// Set headers
-	headers := make(map[string]string)
-	headers["From"] = req.From
-	headers["To"] = req.To
-	headers["Subject"] = req.Subject
-	headers["Date"] = time.Now().Format(time.RFC1123Z)
-
+	// Headers, built in a fixed order: a Go map would shuffle them between sends,
+	// and the first lines are what a strict reader trusts for the sender.
 	var contentType string
 	if req.HTML {
 		contentType = "text/html; charset=UTF-8"
 	} else {
 		contentType = "text/plain; charset=UTF-8"
 	}
-	headers["Content-Type"] = contentType
+
+	headers := [][2]string{
+		{"From", req.From},
+		{"To", req.To},
+	}
+	if req.ReplyTo != "" {
+		headers = append(headers, [2]string{"Reply-To", req.ReplyTo})
+	}
+	headers = append(headers,
+		[2]string{"Subject", req.Subject},
+		[2]string{"Date", time.Now().Format(time.RFC1123Z)},
+		[2]string{"MIME-Version", "1.0"},
+		[2]string{"Content-Type", contentType},
+	)
 
 	// Compose the message
 	message := ""
-	for key, value := range headers {
-		message += fmt.Sprintf("%s: %s\r\n", key, value)
+	for _, h := range headers {
+		message += fmt.Sprintf("%s: %s\r\n", h[0], h[1])
 	}
 	message += "\r\n" + req.Body
 
@@ -96,7 +107,8 @@ func (s *ServiceImpl) Send(req Request, cfg config.Config) error {
 		}
 	}()
 
-	// Set the sender and recipient
+	// Set the sender and recipient. The envelope sender is req.From, which the
+	// handler sets to the site's own address so the relay's SPF check passes.
 	if err = client.Mail(req.From); err != nil {
 		log.Printf("SMTP FROM error: %v", err)
 		return fmt.Errorf("SMTP FROM error: %w", err)
