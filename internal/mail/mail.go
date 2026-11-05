@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/nahuelsantos/contact-api/internal/config"
 )
@@ -24,9 +23,31 @@ type Provider interface {
 	Send(ctx context.Context, m Message) error
 }
 
-// SentBy is implemented by composite providers that report which backend
-// delivered the last message.
-type SentBy interface{ SentBy() string }
+// Result describes one delivery attempt chain.
+type Result struct {
+	SentBy string   // provider that delivered; empty on failure
+	Failed []string // providers that failed before success (or all, on error), in order tried
+}
+
+// Deliverer is implemented by providers that report per-call attribution.
+type Deliverer interface {
+	Deliver(ctx context.Context, m Message) (Result, error)
+}
+
+// Deliver sends m through p and reports which provider(s) were involved.
+func Deliver(ctx context.Context, p Provider, m Message) (Result, error) {
+	if d, ok := p.(Deliverer); ok {
+		res, err := d.Deliver(ctx, m)
+		if err != nil {
+			return res, fmt.Errorf("deliver: %w", err)
+		}
+		return res, nil
+	}
+	if err := p.Send(ctx, m); err != nil {
+		return Result{Failed: []string{p.Name()}}, fmt.Errorf("send via %s: %w", p.Name(), err)
+	}
+	return Result{SentBy: p.Name()}, nil
+}
 
 // Factory builds a Provider from its config.
 type Factory func(name string, c config.ProviderConfig) (Provider, error)
@@ -52,49 +73,42 @@ func Build(cfg map[string]config.ProviderConfig, factories map[string]Factory) (
 }
 
 // WithFallback sends through primary and, if that fails, through fallback.
-// A nil fallback returns primary unchanged.
+// primary must be non-nil. A nil fallback returns primary unchanged.
 func WithFallback(primary, fallback Provider) Provider {
 	if fallback == nil {
 		return primary
 	}
-	return &composite{primary: primary, fallback: fallback, last: primary.Name()}
+	return &composite{primary: primary, fallback: fallback}
 }
 
 type composite struct {
 	primary, fallback Provider
-
-	mu   sync.Mutex
-	last string
 }
 
-// Name returns the name of the provider that sent last.
-func (c *composite) Name() string { return c.SentBy() }
+// Name returns the primary provider's name.
+func (c *composite) Name() string { return c.primary.Name() }
 
-// SentBy returns the name of the provider that last sent successfully.
-func (c *composite) SentBy() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.last
-}
-
-func (c *composite) record(name string) {
-	c.mu.Lock()
-	c.last = name
-	c.mu.Unlock()
-}
-
-// Send tries the primary, then the fallback.
+// Send delivers via Deliver and discards the attribution.
 func (c *composite) Send(ctx context.Context, m Message) error {
+	_, err := c.Deliver(ctx, m)
+	return err
+}
+
+// Deliver tries the primary, then the fallback, reporting the outcome per call.
+func (c *composite) Deliver(ctx context.Context, m Message) (Result, error) {
 	perr := c.primary.Send(ctx, m)
 	if perr == nil {
-		c.record(c.primary.Name())
-		return nil
+		return Result{SentBy: c.primary.Name()}, nil
+	}
+	failed := []string{c.primary.Name()}
+	if ctx.Err() != nil {
+		return Result{Failed: failed}, fmt.Errorf("send failed via %s, fallback skipped: %w",
+			c.primary.Name(), errors.Join(perr, ctx.Err()))
 	}
 	ferr := c.fallback.Send(ctx, m)
 	if ferr == nil {
-		c.record(c.fallback.Name())
-		return nil
+		return Result{SentBy: c.fallback.Name(), Failed: failed}, nil
 	}
-	return fmt.Errorf("send failed via %s and %s: %w",
-		c.primary.Name(), c.fallback.Name(), errors.Join(perr, ferr))
+	return Result{Failed: append(failed, c.fallback.Name())},
+		fmt.Errorf("send failed via %s and %s: %w", c.primary.Name(), c.fallback.Name(), errors.Join(perr, ferr))
 }
