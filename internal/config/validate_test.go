@@ -84,6 +84,26 @@ type = "email"
 name = "_x"
 type = "text"
 `, nil, `field "_x": names starting with _ are reserved`},
+		{"turnstile field reserved", okProvider + okSite + `[site.x.form.f]
+[[site.x.form.f.fields]]
+name = "cf-turnstile-response"
+type = "text"
+`, nil, `field "cf-turnstile-response": name is reserved`},
+		{"uppercase name", okProvider + okSite + `[site.x.form.f]
+[[site.x.form.f.fields]]
+name = "Email"
+type = "text"
+`, nil, `field "Email": names must match ^[a-z0-9_]+$`},
+		{"dash in name", okProvider + okSite + `[site.x.form.f]
+[[site.x.form.f.fields]]
+name = "first-name"
+type = "text"
+`, nil, `field "first-name": names must match ^[a-z0-9_]+$`},
+		{"space in name", okProvider + okSite + `[site.x.form.f]
+[[site.x.form.f.fields]]
+name = "first name"
+type = "text"
+`, nil, `field "first name": names must match ^[a-z0-9_]+$`},
 		{"unknown type", okProvider + okSite + `[site.x.form.f]
 [[site.x.form.f.fields]]
 name = "d"

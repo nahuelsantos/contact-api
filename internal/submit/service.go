@@ -30,9 +30,8 @@ const (
 )
 
 const (
-	turnstileField = "cf-turnstile-response"
-	unknownLabel   = "unknown"
-	maxLoggedName  = 64
+	unknownLabel  = "unknown"
+	maxLoggedName = 64
 )
 
 // Request is one submission, already parsed by the transport layer.
@@ -88,7 +87,7 @@ func (s *Service) Submit(ctx context.Context, req Request) Result {
 		return s.finish(ctx, req, Result{Outcome: RateLimited, RetryAfter: wait}, nil)
 	}
 	if site.TurnstileSecret != "" {
-		if err := s.Turnstile.Verify(ctx, site.TurnstileSecret, req.Fields[turnstileField], req.ClientIP); err != nil {
+		if err := s.Turnstile.Verify(ctx, site.TurnstileSecret, req.Fields[config.TurnstileField], req.ClientIP); err != nil {
 			return s.finish(ctx, req, Result{Outcome: Forbidden}, nil)
 		}
 	}

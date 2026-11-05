@@ -11,7 +11,12 @@ import (
 var (
 	knownFieldTypes = []string{"text", "textarea", "email", "tel", "number", "select", "checkbox", "country"}
 	knownTLS        = []string{"none", "starttls", "implicit"}
+	// fieldNameRe matches what a {{ placeholder }} can reference.
+	fieldNameRe = regexp.MustCompile(`^[a-z0-9_]+$`)
 )
+
+// TurnstileField is posted by the Turnstile widget and never a form field.
+const TurnstileField = "cf-turnstile-response"
 
 // problems collects validation messages.
 type problems []error
@@ -155,6 +160,10 @@ func validateFields(p *problems, where string, fields []Field) map[string]bool {
 			p.addf("%s: field name is required", where)
 		case strings.HasPrefix(fld.Name, "_"):
 			p.addf("%s: names starting with _ are reserved", fw)
+		case fld.Name == TurnstileField:
+			p.addf("%s: name is reserved", fw)
+		case !fieldNameRe.MatchString(fld.Name):
+			p.addf("%s: names must match %s", fw, fieldNameRe)
 		case seen[fld.Name]:
 			p.addf("%s appears twice", fw)
 		}
