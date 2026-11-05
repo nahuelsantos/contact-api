@@ -5,6 +5,7 @@ package submit
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/nahuelsantos/contact-api/internal/config"
@@ -30,8 +31,14 @@ const (
 )
 
 const (
-	unknownLabel  = "unknown"
+	unknownLabel  = observability.UnknownLabel
 	maxLoggedName = 64
+
+	// Delivery is detached from the request: a closed tab or a dropped
+	// upstream must not abort a send half-way (and skip the fallback). These
+	// bound the whole chain; each provider keeps its own shorter timeout.
+	notifyTimeout    = 25 * time.Second
+	autoReplyTimeout = 20 * time.Second
 )
 
 // Request is one submission, already parsed by the transport layer.
@@ -63,11 +70,33 @@ type Service struct {
 	Log       *slog.Logger
 }
 
-// send describes a delivery attempt for logging.
+// send describes a delivery attempt for logging. The error fields hold
+// log-safe classes only (mail.ErrorClass), never provider or server text.
 type send struct {
 	provider        string
 	duration        time.Duration
+	errorClass      string // final failure class on send_failed
+	providerErrors  string // "name:class" for every provider that failed
 	autoReplyFailed bool
+	autoReplyError  string
+}
+
+// providerErrors renders the failed providers of res as "name:class,...".
+func providerErrors(res mail.Result) string {
+	parts := make([]string, 0, len(res.Failed))
+	for i, name := range res.Failed {
+		var err error
+		if i < len(res.Errors) {
+			err = res.Errors[i]
+		}
+		class := mail.ErrorClass(err)
+		if class == "" {
+			class = "error"
+		}
+		parts = append(parts, name+":"+class)
+	}
+
+	return strings.Join(parts, ",")
 }
 
 // Submit runs the request flow and records one metric and one log line.
@@ -97,21 +126,24 @@ func (s *Service) Submit(ctx context.Context, req Request) Result {
 	}
 	note, err := s.Renderer.Notification(site, form, values)
 	if err != nil {
-		return s.finish(ctx, req, Result{Outcome: SendFailed}, nil)
+		return s.finish(ctx, req, Result{Outcome: SendFailed}, &send{errorClass: "render"})
 	}
 	var reply *render.Email
+	replyErr := ""
 	if form.AutoReply != nil {
 		r, rerr := s.Renderer.AutoReply(site, form, values)
 		if rerr != nil {
-			s.Metrics.AutoReplyFailure(req.Site, req.Form)
+			replyErr = "render"
 		} else {
 			reply = &r
 		}
 	}
 
 	prov := s.provider(site)
+	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
+	defer cancel()
 	start := time.Now()
-	res, err := mail.Deliver(ctx, prov, mail.Message{
+	res, err := mail.Deliver(sendCtx, prov, mail.Message{
 		From: site.From, ReplyTo: values.FirstEmail(), To: site.Recipients(form),
 		Subject: note.Subject, HTML: note.HTML, Text: note.Text,
 	})
@@ -127,25 +159,48 @@ func (s *Service) Submit(ctx context.Context, req Request) Result {
 		}
 	}
 	s.Metrics.SendDuration(label, d)
-	sd := &send{provider: label, duration: d}
+	sd := &send{provider: label, duration: d, providerErrors: providerErrors(res)}
 	if err != nil {
+		if n := len(res.Errors); n > 0 {
+			sd.errorClass = mail.ErrorClass(res.Errors[n-1])
+		} else {
+			sd.errorClass = mail.ErrorClass(err)
+		}
 		return s.finish(ctx, req, Result{Outcome: SendFailed}, sd)
 	}
 
-	if reply != nil && values.FirstEmail() != "" {
-		if _, aerr := mail.Deliver(ctx, prov, mail.Message{
-			From: site.From, To: []string{values.FirstEmail()},
-			Subject: reply.Subject, HTML: reply.HTML, Text: reply.Text,
-		}); aerr != nil {
-			s.Metrics.AutoReplyFailure(req.Site, req.Form)
-			sd.autoReplyFailed = true
-		}
-	} else if reply != nil {
+	switch {
+	case reply != nil && values.FirstEmail() != "":
+		replyErr = s.autoReply(ctx, prov, site, reply, values.FirstEmail())
+	case reply != nil:
+		replyErr = "no_email"
+	}
+	if replyErr != "" {
 		s.Metrics.AutoReplyFailure(req.Site, req.Form)
 		sd.autoReplyFailed = true
+		sd.autoReplyError = replyErr
 	}
 
 	return s.finish(ctx, req, Result{Outcome: Sent}, sd)
+}
+
+// autoReply sends the confirmation, detached from the request like the
+// notification, and returns the log-safe failure class ("" on success).
+func (s *Service) autoReply(ctx context.Context, prov mail.Provider, site *config.Site, reply *render.Email, to string) string {
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), autoReplyTimeout)
+	defer cancel()
+	res, err := mail.Deliver(actx, prov, mail.Message{
+		From: site.From, To: []string{to},
+		Subject: reply.Subject, HTML: reply.HTML, Text: reply.Text,
+	})
+	if err == nil {
+		return ""
+	}
+	if pe := providerErrors(res); pe != "" {
+		return pe
+	}
+
+	return mail.ErrorClass(err)
 }
 
 // provider composes the site's primary and fallback providers.
@@ -171,9 +226,17 @@ func (s *Service) finish(ctx context.Context, req Request, res Result, sd *send)
 
 	attrs := []any{"site", site, "form", form, "outcome", string(res.Outcome)}
 	if sd != nil {
-		attrs = append(attrs, "provider", sd.provider, "duration_ms", sd.duration.Milliseconds())
+		if sd.provider != "" {
+			attrs = append(attrs, "provider", sd.provider, "duration_ms", sd.duration.Milliseconds())
+		}
+		if sd.errorClass != "" {
+			attrs = append(attrs, "error_class", sd.errorClass)
+		}
+		if sd.providerErrors != "" {
+			attrs = append(attrs, "provider_errors", sd.providerErrors)
+		}
 		if sd.autoReplyFailed {
-			attrs = append(attrs, "auto_reply_failed", true)
+			attrs = append(attrs, "auto_reply_failed", true, "auto_reply_error", sd.autoReplyError)
 		}
 	}
 	if res.Outcome == Forbidden || res.Outcome == RateLimited {

@@ -3,6 +3,7 @@ package resend_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -82,6 +83,16 @@ func TestSend_Non2xxIsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
+	if !errors.Is(err, resend.ErrStatus) {
+		t.Fatalf("not ErrStatus: %v", err)
+	}
+	var se *mail.SendError
+	if !errors.As(err, &se) || se.Stage != "status" || se.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("SendError = %+v", se)
+	}
+	if c := mail.ErrorClass(err); c != "status_422" {
+		t.Fatalf("class = %q", c)
+	}
 	s := err.Error()
 	if !strings.Contains(s, "422") {
 		t.Fatalf("no status code: %s", s)
@@ -99,8 +110,12 @@ func TestSend_Timeout(t *testing.T) {
 	}))
 	defer srv.Close()
 	p := resend.New("resend", "k", resend.WithBaseURL(srv.URL), resend.WithHTTPClient(&http.Client{Timeout: 100 * time.Millisecond}))
-	if err := p.Send(context.Background(), mail.Message{To: []string{"b@x.io"}}); err == nil {
+	err := p.Send(context.Background(), mail.Message{To: []string{"b@x.io"}})
+	if err == nil {
 		t.Fatal("expected timeout error")
+	}
+	if c := mail.ErrorClass(err); c != "request_timeout" {
+		t.Fatalf("class = %q", c)
 	}
 }
 

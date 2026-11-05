@@ -63,8 +63,11 @@ func TestFallback_PrimaryFails(t *testing.T) {
 	if fallback.calls.Load() != 1 {
 		t.Fatalf("fallback calls = %d", fallback.calls.Load())
 	}
-	if !reflect.DeepEqual(res, mail.Result{SentBy: "b", Failed: []string{"a"}}) {
+	if res.SentBy != "b" || !reflect.DeepEqual(res.Failed, []string{"a"}) {
 		t.Fatalf("res = %+v", res)
+	}
+	if len(res.Errors) != 1 || !errors.Is(res.Errors[0], primary.err) {
+		t.Fatalf("primary error not kept: %+v", res.Errors)
 	}
 	if err := p.Send(context.Background(), mail.Message{}); err != nil {
 		t.Fatalf("Send: %v", err)
@@ -84,6 +87,9 @@ func TestFallback_BothFail(t *testing.T) {
 	if res.SentBy != "" || !reflect.DeepEqual(res.Failed, []string{"a", "b"}) {
 		t.Fatalf("res = %+v", res)
 	}
+	if len(res.Errors) != 2 || !errors.Is(res.Errors[0], e1) || !errors.Is(res.Errors[1], e2) {
+		t.Fatalf("errors = %+v", res.Errors)
+	}
 }
 
 func TestDeliver_PlainProvider(t *testing.T) {
@@ -95,6 +101,9 @@ func TestDeliver_PlainProvider(t *testing.T) {
 	res, err = mail.Deliver(context.Background(), &fake{name: "a", err: boom}, mail.Message{})
 	if !errors.Is(err, boom) || res.SentBy != "" || !reflect.DeepEqual(res.Failed, []string{"a"}) {
 		t.Fatalf("res = %+v err = %v", res, err)
+	}
+	if len(res.Errors) != 1 || !errors.Is(res.Errors[0], boom) {
+		t.Fatalf("errors = %+v", res.Errors)
 	}
 }
 
@@ -164,5 +173,46 @@ func TestBuild_UsesFactory(t *testing.T) {
 	}
 	if got["x"] == nil || got["x"].Name() != "x" {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string { return "i/o timeout" }
+func (timeoutErr) Timeout() bool { return true }
+
+func TestErrorClass(t *testing.T) {
+	leak := errors.New("550 MARK-SERVER-TEXT <visitor@leak.test> unknown")
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"nil", nil, ""},
+		{"http status", &mail.SendError{Stage: "status", Code: 502, Err: leak}, "status_502"},
+		{"smtp rcpt", &mail.SendError{Stage: "rcpt", Code: 550, Err: leak}, "rcpt_550"},
+		{"wrapped", fmt.Errorf("deliver: %w", &mail.SendError{Stage: "auth", Code: 535, Err: leak}), "auth_535"},
+		{"stage timeout", &mail.SendError{Stage: "dial", Err: timeoutErr{}}, "dial_timeout"},
+		{"stage deadline", &mail.SendError{Stage: "request", Err: context.DeadlineExceeded}, "request_timeout"},
+		{"stage canceled", &mail.SendError{Stage: "data", Err: context.Canceled}, "data_canceled"},
+		{"stage only", &mail.SendError{Stage: "dial", Err: leak}, "dial"},
+		{"bare deadline", context.DeadlineExceeded, "timeout"},
+		{"bare canceled", context.Canceled, "canceled"},
+		{"unknown", leak, "error"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mail.ErrorClass(tc.err); got != tc.want {
+				t.Fatalf("ErrorClass = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSendError_UnwrapsAndKeepsMessage(t *testing.T) {
+	inner := errors.New("inner")
+	err := error(&mail.SendError{Stage: "dial", Err: inner})
+	if !errors.Is(err, inner) || err.Error() != "inner" {
+		t.Fatalf("err = %v", err)
 	}
 }

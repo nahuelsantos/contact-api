@@ -100,7 +100,16 @@ every form POST. Requests must send `Content-Type: application/json`.
 | `GET /version.json`, `/api/version.json` | `{"sha":"<git sha>"}` |
 | `GET /metrics` | Prometheus metrics |
 
-Logs are JSON on stdout and never contain submitted values.
+Logs are JSON on stdout and never contain submitted values. Each submission
+logs one `submission` line. When delivery fails it names the failure class
+only, never server text or message content: `error_class` (the final failure,
+on `send_failed`), `provider_errors` (`name:class` for every provider that
+failed, also when a fallback delivered) and `auto_reply_error`. A class is the
+stage plus the numeric reply, such as `status_502` (Resend HTTP status),
+`rcpt_550` or `auth_535` (SMTP stage and reply code), `dial_timeout`.
+
+Delivery is detached from the request: a visitor closing the tab does not abort
+a send. The notification chain is bounded at 25 s and the auto-reply at 20 s.
 
 ## Environment variables
 

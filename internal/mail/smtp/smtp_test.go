@@ -158,6 +158,7 @@ type received struct {
 
 type testBackend struct {
 	insecureAuth bool
+	rejectRcpt   bool
 	mu           sync.Mutex
 	got          []received
 	wantAuth     bool
@@ -195,6 +196,9 @@ func (s *testSession) Mail(from string, _ *gosmtp.MailOptions) error {
 }
 
 func (s *testSession) Rcpt(to string, _ *gosmtp.RcptOptions) error {
+	if s.b.rejectRcpt {
+		return &gosmtp.SMTPError{Code: 550, EnhancedCode: gosmtp.EnhancedCode{5, 1, 1}, Message: "MARK-SERVER-TEXT " + to + " unknown"}
+	}
 	s.cur.rcpt = append(s.cur.rcpt, to)
 	return nil
 }
@@ -335,8 +339,37 @@ func TestSend_BadAuth(t *testing.T) {
 	p := New("relay", config.ProviderConfig{
 		Type: "smtp", Host: host, Port: port, TLS: "starttls", Username: "u", Password: "wrong",
 	}, withTLSConfig(&tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12})) //nolint:gosec // self-signed test cert
-	if err := p.Send(context.Background(), sampleMessage()); err == nil {
+	err := p.Send(context.Background(), sampleMessage())
+	if err == nil {
 		t.Fatal("expected auth failure")
+	}
+	var se *mail.SendError
+	if !errors.As(err, &se) || se.Stage != "auth" || se.Code != 535 {
+		t.Fatalf("SendError = %+v (%v)", se, err)
+	}
+}
+
+func TestSend_RcptRejectedIsClassifiedWithoutServerText(t *testing.T) {
+	b := &testBackend{rejectRcpt: true}
+	host, port := startServer(t, b, nil, false)
+	p := New("melee", config.ProviderConfig{Type: "smtp", Host: host, Port: port})
+	err := p.Send(context.Background(), sampleMessage())
+	var se *mail.SendError
+	if !errors.As(err, &se) || se.Stage != "rcpt" || se.Code != 550 {
+		t.Fatalf("SendError = %+v (%v)", se, err)
+	}
+	if c := mail.ErrorClass(err); c != "rcpt_550" {
+		t.Fatalf("class = %q", c)
+	}
+}
+
+func TestSend_DialFailureIsClassified(t *testing.T) {
+	ln := listen(t)
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	p := New("melee", config.ProviderConfig{Type: "smtp", Host: "127.0.0.1", Port: port})
+	if c := mail.ErrorClass(p.Send(context.Background(), sampleMessage())); c != "dial" {
+		t.Fatalf("class = %q", c)
 	}
 }
 

@@ -3,6 +3,7 @@ package submit_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"slices"
@@ -328,23 +329,193 @@ func TestSubmit_LogsNoFieldValues(t *testing.T) {
 	r := req()
 	markers := []string{"MARK-NAME-7731", "mark-mail-7731@leak.test", "MARK-MSG-7731"}
 	r.Fields = map[string]string{"name": markers[0], "email": markers[1], "message": markers[2], "extra": "MARK-EXTRA-7731"}
-	e.svc.Submit(t.Context(), r)
-	// Also exercise failure and invalid paths with markers present.
-	e.primary.err = errBoom
-	e.svc.Submit(t.Context(), r)
-	r.Fields["email"] = "MARK-BAD-7731"
-	e.svc.Submit(t.Context(), r)
+	calls := 0
+	submitOnce := func(rq submit.Request) submit.Outcome {
+		calls++
+		return e.svc.Submit(t.Context(), rq).Outcome
+	}
+
+	if o := submitOnce(r); o != submit.Sent {
+		t.Fatalf("sent: %s", o)
+	}
+	// A provider error that echoes the visitor address, as an SMTP RCPT
+	// rejection can, must not reach the log.
+	e.primary.err = &mail.SendError{Stage: "rcpt", Code: 550, Err: errors.New("550 <" + markers[1] + "> MARK-SERVER-7731")}
+	if o := submitOnce(r); o != submit.SendFailed {
+		t.Fatalf("send_failed: %s", o)
+	}
+	e.primary.err = errors.New("plain error " + markers[0])
+	if o := submitOnce(r); o != submit.SendFailed {
+		t.Fatalf("send_failed plain: %s", o)
+	}
+	e.primary.err = nil
+	bad := req()
+	bad.Fields = map[string]string{"name": markers[0], "email": "MARK-BAD-7731", "message": markers[2]}
+	if o := submitOnce(bad); o != submit.Invalid {
+		t.Fatalf("invalid: %s", o)
+	}
+	evil := r
+	evil.Origin = "https://evil.example"
+	if o := submitOnce(evil); o != submit.Forbidden {
+		t.Fatalf("forbidden: %s", o)
+	}
+	spam := req()
+	spam.Fields = map[string]string{"name": markers[0], "email": markers[1], "message": markers[2], "_gotcha": "MARK-GOTCHA-7731"}
+	if o := submitOnce(spam); o != submit.Spam {
+		t.Fatalf("spam: %s", o)
+	}
+	for o := submit.Outcome(""); o != submit.RateLimited; {
+		if calls > 20 {
+			t.Fatal("never rate limited")
+		}
+		o = submitOnce(r)
+	}
 
 	out := e.logs.String()
-	for _, m := range append(markers, "MARK-EXTRA-7731", "MARK-BAD-7731") {
+	for _, m := range append(markers, "MARK-EXTRA-7731", "MARK-BAD-7731", "MARK-SERVER-7731", "MARK-GOTCHA-7731") {
 		if strings.Contains(out, m) {
-			t.Fatalf("log contains field value %q: %s", m, out)
+			t.Fatalf("log contains %q: %s", m, out)
 		}
 	}
-	for _, k := range []string{`"site"`, `"form"`, `"outcome"`} {
-		if !strings.Contains(out, k) {
-			t.Fatalf("log lacks %s: %s", k, out)
+	lines := logLines(t, e)
+	if len(lines) != calls {
+		t.Fatalf("%d log lines for %d submissions:\n%s", len(lines), calls, out)
+	}
+	for _, l := range lines {
+		for _, k := range []string{"site", "form", "outcome"} {
+			if _, ok := l[k]; !ok {
+				t.Fatalf("log line lacks %s: %v", k, l)
+			}
 		}
+	}
+}
+
+func logLines(t *testing.T, e *env) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, raw := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
+		if raw == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			t.Fatalf("bad log line %q: %v", raw, err)
+		}
+		out = append(out, m)
+	}
+
+	return out
+}
+
+func lastLine(t *testing.T, e *env) map[string]any {
+	t.Helper()
+	lines := logLines(t, e)
+	if len(lines) == 0 {
+		t.Fatal("no log line")
+	}
+
+	return lines[len(lines)-1]
+}
+
+func TestSubmit_SendFailedLogsErrorClass(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.Defaults.Fallback = "backup" })
+	e.primary.err = &mail.SendError{Stage: "rcpt", Code: 550, Err: errors.New("550 ana@example.com unknown")}
+	e.fallback.err = &mail.SendError{Stage: "status", Code: 502, Err: errBoom}
+	if res := e.svc.Submit(t.Context(), req()); res.Outcome != submit.SendFailed {
+		t.Fatalf("outcome = %s", res.Outcome)
+	}
+	l := lastLine(t, e)
+	if l["error_class"] != "status_502" || l["provider_errors"] != "main:rcpt_550,backup:status_502" {
+		t.Fatalf("log line = %v", l)
+	}
+	if strings.Contains(e.logs.String(), "ana@example.com") {
+		t.Fatalf("server text leaked: %s", e.logs)
+	}
+}
+
+func TestSubmit_FallbackSuccessLogsPrimaryErrorClass(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.Defaults.Fallback = "backup" })
+	e.primary.err = &mail.SendError{Stage: "dial", Err: context.DeadlineExceeded}
+	if res := e.svc.Submit(t.Context(), req()); res.Outcome != submit.Sent {
+		t.Fatalf("outcome = %s", res.Outcome)
+	}
+	l := lastLine(t, e)
+	if l["provider_errors"] != "main:dial_timeout" || l["provider"] != "backup" {
+		t.Fatalf("log line = %v", l)
+	}
+	if _, ok := l["error_class"]; ok {
+		t.Fatalf("error_class on a sent submission: %v", l)
+	}
+}
+
+func TestSubmit_AutoReplyFailureLogsErrorClass(t *testing.T) {
+	e := newEnv(t, withAutoReply)
+	e.svc.Providers["main"] = &secondFails{fakeProvider: e.primary}
+	if res := e.svc.Submit(t.Context(), req()); res.Outcome != submit.Sent {
+		t.Fatalf("outcome = %s", res.Outcome)
+	}
+	l := lastLine(t, e)
+	if l["auto_reply_failed"] != true || l["auto_reply_error"] != "main:error" {
+		t.Fatalf("log line = %v", l)
+	}
+}
+
+// blockingProvider holds every send until released, then fails if its
+// context was cancelled, as a real provider would.
+type blockingProvider struct {
+	name     string
+	started  chan struct{}
+	release  chan struct{}
+	once     sync.Once
+	mu       sync.Mutex
+	sent     int
+	deadline []bool
+}
+
+func (b *blockingProvider) Name() string { return b.name }
+
+func (b *blockingProvider) Send(ctx context.Context, _ mail.Message) error {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sent++
+	_, ok := ctx.Deadline()
+	b.deadline = append(b.deadline, ok)
+
+	return nil
+}
+
+func TestSubmit_DeliveryOutlivesRequestCancellation(t *testing.T) {
+	e := newEnv(t, withAutoReply)
+	bp := &blockingProvider{name: "main", started: make(chan struct{}), release: make(chan struct{})}
+	e.svc.Providers["main"] = bp
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan submit.Result, 1)
+	go func() { done <- e.svc.Submit(ctx, req()) }()
+	<-bp.started
+	cancel() // the visitor closed the tab
+	close(bp.release)
+
+	if res := <-done; res.Outcome != submit.Sent {
+		t.Fatalf("outcome = %s", res.Outcome)
+	}
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+	if bp.sent != 2 {
+		t.Fatalf("sent = %d, want notification and auto-reply", bp.sent)
+	}
+	for i, ok := range bp.deadline {
+		if !ok {
+			t.Fatalf("send %d had no deadline: delivery must stay bounded", i)
+		}
+	}
+	if got := e.counter(t, "contact_provider_failures_total", map[string]string{"provider": "main"}); got != 0 {
+		t.Fatalf("provider failure counted: %v", got)
 	}
 }
 

@@ -82,13 +82,16 @@ func (p *Provider) Send(ctx context.Context, m mail.Message) error {
 	resp, err := p.client.Do(req)
 	if err != nil {
 		// url.Error carries only method and URL, not the body.
-		return fmt.Errorf("resend: send: %w", err)
+		return &mail.SendError{Stage: "request", Err: fmt.Errorf("resend: send: %w", err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("%w: %d", ErrStatus, resp.StatusCode)
+		return &mail.SendError{
+			Stage: "status", Code: resp.StatusCode,
+			Err: fmt.Errorf("%w: %d", ErrStatus, resp.StatusCode),
+		}
 	}
 	return nil
 }

@@ -135,11 +135,11 @@ func (p *Provider) deliver(ctx context.Context, deadline time.Time, from string,
 		conn, err = nd.DialContext(ctx, "tcp", addr)
 	}
 	if err != nil {
-		return fmt.Errorf("smtp: dial: %w", err)
+		return stageErr("dial", fmt.Errorf("smtp: dial: %w", err))
 	}
 	defer func() { _ = conn.Close() }()
 	if err := conn.SetDeadline(deadline); err != nil {
-		return fmt.Errorf("smtp: set deadline: %w", err)
+		return stageErr("dial", fmt.Errorf("smtp: set deadline: %w", err))
 	}
 	// Abort a blocked exchange when the caller cancels.
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -147,42 +147,53 @@ func (p *Provider) deliver(ctx context.Context, deadline time.Time, from string,
 
 	c, err := netsmtp.NewClient(conn, p.host)
 	if err != nil {
-		return fmt.Errorf("smtp: greeting: %w", err)
+		return stageErr("greeting", fmt.Errorf("smtp: greeting: %w", err))
 	}
 	defer func() { _ = c.Close() }()
 
 	if p.tlsMode == "starttls" {
 		if err := c.StartTLS(tlsCfg); err != nil {
-			return fmt.Errorf("smtp: starttls: %w", err)
+			return stageErr("tls", fmt.Errorf("smtp: starttls: %w", err))
 		}
 	}
 	if p.username != "" {
 		if err := c.Auth(netsmtp.PlainAuth("", p.username, p.password, p.host)); err != nil {
-			return fmt.Errorf("smtp: auth: %w", err)
+			return stageErr("auth", fmt.Errorf("smtp: auth: %w", err))
 		}
 	}
 	if err := c.Mail(from); err != nil {
-		return fmt.Errorf("smtp: mail from: %w", err)
+		return stageErr("mail", fmt.Errorf("smtp: mail from: %w", err))
 	}
 	for _, r := range rcpts {
 		if err := c.Rcpt(r); err != nil {
-			return fmt.Errorf("smtp: rcpt to: %w", err)
+			return stageErr("rcpt", fmt.Errorf("smtp: rcpt to: %w", err))
 		}
 	}
 	w, err := c.Data()
 	if err != nil {
-		return fmt.Errorf("smtp: data: %w", err)
+		return stageErr("data", fmt.Errorf("smtp: data: %w", err))
 	}
 	if _, err := w.Write(body); err != nil {
-		return fmt.Errorf("smtp: write body: %w", err)
+		return stageErr("data", fmt.Errorf("smtp: write body: %w", err))
 	}
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("smtp: end data: %w", err)
+		return stageErr("data", fmt.Errorf("smtp: end data: %w", err))
 	}
 	// The server has accepted the message; a failing QUIT must not turn a
 	// delivered message into an error (it would trigger a duplicate send).
 	_ = c.Quit()
 	return nil
+}
+
+// stageErr tags err with the SMTP stage and, when the server answered, its
+// numeric reply code. The server text stays only in the wrapped error.
+func stageErr(stage string, err error) error {
+	se := &mail.SendError{Stage: stage, Err: err}
+	var tp *textproto.Error
+	if errors.As(err, &tp) {
+		se.Code = tp.Code
+	}
+	return se
 }
 
 func messageID(fromAddr string) (string, error) {

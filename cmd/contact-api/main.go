@@ -28,9 +28,11 @@ const (
 	defaultConfigPath = "/etc/contact-api/forms.toml"
 	serviceName       = "contact-api"
 	readTimeout       = 30 * time.Second
-	writeTimeout      = 30 * time.Second
-	idleTimeout       = 120 * time.Second
-	shutdownTimeout   = 10 * time.Second
+	// writeTimeout covers detached delivery: up to 25 s for the notification
+	// chain plus 20 s for the auto-reply (internal/submit).
+	writeTimeout    = 50 * time.Second
+	idleTimeout     = 120 * time.Second
+	shutdownTimeout = 10 * time.Second
 )
 
 // sha is the build revision, set with -X main.sha=<git sha>.
