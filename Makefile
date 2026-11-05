@@ -10,7 +10,7 @@ help: ## Show this help message
 
 run: ## Run the application locally
 	@echo "Starting Contact API on port 3002..."
-	go run cmd/contact-api/main.go
+	go run ./cmd/contact-api
 
 test: ## Run linting and tests
 	@echo "Running linter..."
