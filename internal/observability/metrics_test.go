@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nahuelsantos/contact-api/internal/config"
 	"github.com/nahuelsantos/contact-api/internal/observability"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -73,4 +74,50 @@ func TestMetrics_CollectAndCount(t *testing.T) {
 func TestMetrics_NilRegistererDoesNotPanic(t *testing.T) {
 	m := observability.NewMetrics(nil)
 	m.Submission("a", "f", "sent")
+}
+
+func TestMetrics_PreinitCreatesZeroSeries(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := observability.NewMetrics(reg)
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{"resend": {Type: "resend"}, "smtp": {Type: "smtp"}},
+		Sites: map[string]*config.Site{
+			"a": {Name: "a", Forms: map[string]*config.Form{
+				"contact": {Name: "contact", AutoReply: &config.AutoReply{Subject: "s", Body: "b"}},
+				"quote":   {Name: "quote"},
+			}},
+			"b": {Name: "b", Forms: map[string]*config.Form{"contact": {Name: "contact"}}},
+		},
+	}
+	m.Preinit(cfg)
+
+	outcomes := []string{"sent", "spam", "invalid", "forbidden", "rate_limited", "send_failed"}
+	for _, sf := range [][2]string{{"a", "contact"}, {"a", "quote"}, {"b", "contact"}} {
+		for _, o := range outcomes {
+			sel := `contact_submissions_total{form="` + sf[1] + `",outcome="` + o + `",site="` + sf[0] + `"}`
+			if got := gatherValue(t, reg, sel); got != 0 {
+				t.Errorf("%s = %v, want 0", sel, got)
+			}
+		}
+	}
+	gatherValue(t, reg, `contact_submissions_total{form="unknown",outcome="not_found",site="unknown"}`)
+	gatherValue(t, reg, `contact_provider_failures_total{provider="resend"}`)
+	gatherValue(t, reg, `contact_provider_failures_total{provider="smtp"}`)
+	gatherValue(t, reg, `contact_autoreply_failures_total{form="contact",site="a"}`)
+
+	for name, want := range map[string]int{
+		"contact_submissions_total":        3*len(outcomes) + 1,
+		"contact_provider_failures_total":  2,
+		"contact_autoreply_failures_total": 1, // only forms with auto_reply
+	} {
+		if got, err := testutil.GatherAndCount(reg, name); err != nil || got != want {
+			t.Errorf("%s: count=%d err=%v, want %d", name, got, err, want)
+		}
+	}
+
+	// A later failure is then an increase from 0, which increase() sees.
+	m.ProviderFailure("resend")
+	if got := gatherValue(t, reg, `contact_provider_failures_total{provider="resend"}`); got != 1 {
+		t.Fatalf("after failure = %v, want 1", got)
+	}
 }

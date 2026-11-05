@@ -80,11 +80,14 @@ func run() error {
 	}
 	defer shutdownTracing()
 
+	metrics := observability.NewMetrics(prometheus.DefaultRegisterer)
+	metrics.Preinit(cfg)
+
 	svc := &submit.Service{
 		Config: cfg, Providers: providers, Renderer: renderer,
 		Limiter:   guard.NewLimiter(time.Now),
 		Turnstile: guard.NewTurnstile(nil, ""),
-		Metrics:   observability.NewMetrics(prometheus.DefaultRegisterer),
+		Metrics:   metrics,
 		Log:       slog.Default(),
 	}
 

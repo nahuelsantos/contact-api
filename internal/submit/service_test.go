@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -344,5 +345,18 @@ func TestSubmit_LogsNoFieldValues(t *testing.T) {
 		if !strings.Contains(out, k) {
 			t.Fatalf("log lacks %s: %s", k, out)
 		}
+	}
+}
+
+func TestOutcomesMatchPreinitialisedMetrics(t *testing.T) {
+	got := []string{
+		string(submit.Sent), string(submit.Spam), string(submit.Invalid),
+		string(submit.Forbidden), string(submit.RateLimited), string(submit.SendFailed),
+	}
+	if !slices.Equal(got, observability.SubmissionOutcomes) {
+		t.Fatalf("outcomes %v != observability.SubmissionOutcomes %v", got, observability.SubmissionOutcomes)
+	}
+	if string(submit.NotFound) != observability.NotFoundOutcome {
+		t.Fatalf("not found outcome %q != %q", submit.NotFound, observability.NotFoundOutcome)
 	}
 }
