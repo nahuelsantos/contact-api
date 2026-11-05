@@ -3,6 +3,8 @@ module github.com/nahuelsantos/contact-api
 go 1.26
 
 require (
+	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
+	github.com/emersion/go-smtp v0.25.1
 	github.com/pelletier/go-toml/v2 v2.4.3
 	go.opentelemetry.io/otel v1.24.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.24.0
