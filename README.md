@@ -89,7 +89,7 @@ v2 form named `contact` of the site `{website}`, JSON only, and answers with the
 old bodies: `{"success":true,"message":"..."}` on success (and for spam),
 `{"success":false,"message":"..."}` with 400 (invalid), 403, 404, 429 or 500
 (send failed). It needs an `Origin` or `Referer` header, which browsers send on
-every form POST.
+every form POST. Requests must send `Content-Type: application/json`.
 
 ## Operations
 

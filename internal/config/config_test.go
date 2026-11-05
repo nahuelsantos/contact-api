@@ -25,6 +25,19 @@ func writeTOML(t *testing.T, body string) string {
 	return p
 }
 
+func TestLoad_Dev(t *testing.T) {
+	cfg, err := Load("../../config/dev.toml", envMap(nil), alwaysTrue)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if p := cfg.Providers["melee"]; p.Host != "mail-server" || p.Port != 1025 {
+		t.Fatalf("dev smtp provider = %+v", p)
+	}
+	if _, _, ok := cfg.Lookup("example", "contact"); !ok {
+		t.Fatal("example/contact not found")
+	}
+}
+
 func TestLoad_Example(t *testing.T) {
 	cfg, err := Load("../../config/example.toml", envMap(nil), alwaysTrue)
 	if err != nil {

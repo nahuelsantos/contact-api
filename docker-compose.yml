@@ -11,7 +11,7 @@ services:
       - CONFIG_FILE=/etc/contact-api/forms.toml
       - RESEND_API_KEY=${RESEND_API_KEY:-}
     volumes:
-      - ./config/example.toml:/etc/contact-api/forms.toml:ro
+      - ./config/dev.toml:/etc/contact-api/forms.toml:ro
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:3002/healthz" ]
       interval: 30s
