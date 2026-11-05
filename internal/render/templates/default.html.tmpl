@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<body style="margin:0;padding:24px;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#18181b;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e4e4e7;border-radius:8px;">
+<tr><td style="padding:20px 24px;border-bottom:1px solid #e4e4e7;">
+<span style="display:inline-block;padding:2px 8px;background:#e4e4e7;border-radius:4px;font-size:12px;color:#3f3f46;">{{.Site}} / {{.Form}}</span>
+</td></tr>
+{{range .Fields}}<tr><td style="padding:14px 24px 0 24px;">
+<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#71717a;">{{.Label}}</div>
+<div style="font-size:15px;line-height:1.5;margin-top:2px;">{{range $i, $l := lines .Value}}{{if $i}}<br>{{end}}{{$l}}{{end}}</div>
+</td></tr>
+{{end}}<tr><td style="padding:16px 24px;"></td></tr>
+</table>
+</body>
+</html>
