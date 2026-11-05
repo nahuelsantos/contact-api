@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -148,5 +149,18 @@ func TestDuration_Zero(t *testing.T) {
 	}
 	if err := d.UnmarshalText([]byte("bogus")); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestReplacePlaceholders(t *testing.T) {
+	got := ReplacePlaceholders("Hola {{nombre}} {{ apellido }} {{x}}", func(n string) string {
+		if n == "x" {
+			return ""
+		}
+
+		return strings.ToUpper(n)
+	})
+	if want := "Hola NOMBRE APELLIDO "; got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }

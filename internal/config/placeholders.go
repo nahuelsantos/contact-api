@@ -13,3 +13,10 @@ func Placeholders(s string) []string {
 
 	return names
 }
+
+// ReplacePlaceholders substitutes every {{ name }} marker with fn(name).
+func ReplacePlaceholders(s string, fn func(name string) string) string {
+	return placeholderRe.ReplaceAllStringFunc(s, func(m string) string {
+		return fn(placeholderRe.FindStringSubmatch(m)[1])
+	})
+}
