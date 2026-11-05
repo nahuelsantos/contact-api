@@ -71,6 +71,7 @@ func NewRouter(svc *submit.Service, cfg *config.Config, info BuildInfo) *gin.Eng
 	r.POST("/api/v2/sites/:site/forms/:form", h.submit)
 	r.OPTIONS("/api/v2/sites/:site/forms/:form", h.preflight)
 	r.POST("/api/v1/contact/:website", h.v1)
+	r.OPTIONS("/api/v1/contact/:website", h.v1Preflight)
 
 	healthz := func(c *gin.Context) { c.String(http.StatusOK, "ok") }
 	version := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"sha": info.SHA}) }
@@ -108,8 +109,8 @@ type v2 struct {
 }
 
 // cors adds CORS headers when the request origin is allowed for the site.
-func (h *v2) cors(c *gin.Context, preflight bool) {
-	site, _, ok := h.cfg.Lookup(c.Param("site"), c.Param("form"))
+func (h *v2) cors(c *gin.Context, siteName, formName string, preflight bool) {
+	site, _, ok := h.cfg.Lookup(siteName, formName)
 	if !ok {
 		return
 	}
@@ -126,12 +127,17 @@ func (h *v2) cors(c *gin.Context, preflight bool) {
 }
 
 func (h *v2) preflight(c *gin.Context) {
-	h.cors(c, true)
+	h.cors(c, c.Param("site"), c.Param("form"), true)
+	c.Status(http.StatusNoContent)
+}
+
+func (h *v2) v1Preflight(c *gin.Context) {
+	h.cors(c, c.Param("website"), v1Form, true)
 	c.Status(http.StatusNoContent)
 }
 
 func (h *v2) submit(c *gin.Context) {
-	h.cors(c, false)
+	h.cors(c, c.Param("site"), c.Param("form"), false)
 
 	mt, _, _ := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if mt != contentJSON && mt != contentForm {
@@ -174,14 +180,14 @@ func (h *v2) submit(c *gin.Context) {
 	}
 }
 
-// v1 serves the v0 endpoint as form "contact" of the named site (JSON only).
+// v1 serves the v0 endpoint as form "contact" of the named site. Like v0 it
+// reads the body as JSON whatever the Content-Type, and answers CORS for the
+// site's origins.
 func (h *v2) v1(c *gin.Context) {
-	fields := map[string]string{}
-	if mt, _, _ := mime.ParseMediaType(c.GetHeader("Content-Type")); mt == contentJSON {
-		limit := int64(h.cfg.Server.MaxBodyKB) * bytesPerKB
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
-		fields, _ = readFields(c.Request.Body, mt) // a bad body is an empty submission
-	}
+	h.cors(c, c.Param("website"), v1Form, false)
+	limit := int64(h.cfg.Server.MaxBodyKB) * bytesPerKB
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+	fields, _ := readFields(c.Request.Body, contentJSON) // a bad or oversized body is an empty submission
 
 	res := h.svc.Submit(c.Request.Context(), submit.Request{
 		Site: c.Param("website"), Form: v1Form,

@@ -285,10 +285,62 @@ func TestV1_Errors(t *testing.T) {
 			t.Fatal("missing Retry-After")
 		}
 	})
-	t.Run("not json", func(t *testing.T) {
-		rec := newRig(t).do(http.MethodPost, v1Path, "text/plain", origin, v1JSON)
+	t.Run("malformed body", func(t *testing.T) {
+		rec := newRig(t).do(http.MethodPost, v1Path, "application/json", origin, `{not json`)
 		assertBody(t, rec, 400, `{"success":false,"message":"Invalid request format"}`)
 	})
+	t.Run("too large", func(t *testing.T) {
+		big := `{"name":"Ana","email":"ana@example.com","message":"` + strings.Repeat("a", 65*1024) + `"}`
+		rec := newRig(t).do(http.MethodPost, v1Path, "text/plain", origin, big)
+		assertBody(t, rec, 400, `{"success":false,"message":"Invalid request format"}`)
+	})
+}
+
+// v0 parsed the body as JSON whatever the Content-Type (e.g. a fetch with a
+// string body sends text/plain).
+func TestV1_JSONBodyWithAnyContentType(t *testing.T) {
+	for _, ct := range []string{"text/plain;charset=UTF-8", "", "application/x-www-form-urlencoded"} {
+		r := newRig(t)
+		rec := r.do(http.MethodPost, v1Path, ct, origin, v1JSON)
+		assertBody(t, rec, 200, v1OK)
+		if len(r.prov.sent) != 1 {
+			t.Fatalf("%q: sent = %d", ct, len(r.prov.sent))
+		}
+	}
+}
+
+func TestV1_CORS(t *testing.T) {
+	r := newRig(t)
+	rec := r.do(http.MethodOptions, v1Path, "", origin, "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d", rec.Code)
+	}
+	for k, v := range map[string]string{
+		"Access-Control-Allow-Origin":  origin,
+		"Access-Control-Allow-Methods": "POST",
+		"Access-Control-Allow-Headers": "Content-Type",
+		"Vary":                         "Origin",
+	} {
+		if got := rec.Header().Get(k); got != v {
+			t.Errorf("preflight %s = %q, want %q", k, got, v)
+		}
+	}
+
+	rec = r.do(http.MethodPost, v1Path, "application/json", origin, v1JSON)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != origin {
+		t.Fatalf("POST ACAO = %q", got)
+	}
+
+	for _, p := range []string{v1Path, "/api/v1/contact/nope"} {
+		rec = r.do(http.MethodOptions, p, "", "https://evil.example", "")
+		if rec.Code != http.StatusNoContent || rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("%s: status %d, ACAO %q", p, rec.Code, rec.Header().Get("Access-Control-Allow-Origin"))
+		}
+	}
+	rec = r.do(http.MethodPost, v1Path, "application/json", "https://evil.example", v1JSON)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("disallowed origin got ACAO %q", got)
+	}
 }
 
 func TestV1_RequiresOrigin(t *testing.T) {

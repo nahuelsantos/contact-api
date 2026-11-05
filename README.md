@@ -85,11 +85,13 @@ preflights are answered for allowed origins.
 ## v1 compatibility
 
 `POST /api/v1/contact/{website}` keeps working for existing sites. It is the
-v2 form named `contact` of the site `{website}`, JSON only, and answers with the
-old bodies: `{"success":true,"message":"..."}` on success (and for spam),
+v2 form named `contact` of the site `{website}` and answers with the old
+bodies: `{"success":true,"message":"..."}` on success (and for spam),
 `{"success":false,"message":"..."}` with 400 (invalid), 403, 404, 429 or 500
 (send failed). It needs an `Origin` or `Referer` header, which browsers send on
-every form POST. Requests must send `Content-Type: application/json`.
+every form POST. As in v0 the body is read as JSON whatever the `Content-Type`
+(a `text/plain` fetch body works), up to the configured size. CORS headers and
+`OPTIONS` preflights (204) are answered for the site's `origins`, like v2.
 
 ## Operations
 
