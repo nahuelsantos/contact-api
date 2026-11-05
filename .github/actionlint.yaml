@@ -1,0 +1,6 @@
+self-hosted-runner:
+  # GARM scale sets on plunder (home-lab docs/runbooks/ci-runners.md): pull requests run in
+  # contact-api-pr; pushes to main, dispatches and CD in contact-api-release.
+  labels:
+    - contact-api-pr
+    - contact-api-release

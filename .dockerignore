@@ -1,0 +1,9 @@
+.git
+.githooks
+.github
+.superpowers
+docs
+*.md
+!README.md
+.env
+.env.*

@@ -1,9 +1,10 @@
-// Package contact provides the main entry point for the Contact API server
-package contact
+// Package main is the contact-api entrypoint.
+package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,181 +12,145 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	_ "github.com/nahuelsantos/contact-api/docs"
 	"github.com/nahuelsantos/contact-api/internal/config"
+	"github.com/nahuelsantos/contact-api/internal/guard"
 	"github.com/nahuelsantos/contact-api/internal/handlers"
+	"github.com/nahuelsantos/contact-api/internal/mail"
+	"github.com/nahuelsantos/contact-api/internal/mail/resend"
+	"github.com/nahuelsantos/contact-api/internal/mail/smtp"
 	"github.com/nahuelsantos/contact-api/internal/observability"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	"github.com/nahuelsantos/contact-api/internal/render"
+	"github.com/nahuelsantos/contact-api/internal/submit"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-// @title Contact API
-// @version 1.0
-// @description REST API for handling contact form submissions from websites
-// @termsOfService http://swagger.io/terms/
+const (
+	defaultConfigPath = "/etc/contact-api/forms.toml"
+	serviceName       = "contact-api"
+	readTimeout       = 30 * time.Second
+	// writeTimeout covers detached delivery: up to 25 s for the notification
+	// chain plus 20 s for the auto-reply (internal/submit).
+	writeTimeout    = 50 * time.Second
+	idleTimeout     = 120 * time.Second
+	shutdownTimeout = 10 * time.Second
+)
 
-// @contact.name API Support
-// @contact.url http://www.swagger.io/support
-// @contact.email support@swagger.io
+// sha is the build revision, set with -X main.sha=<git sha>.
+var sha = "dev"
 
-// @license.name MIT
-// @license.url https://opensource.org/licenses/MIT
-
-// @host localhost:3002
-// @BasePath /api/v1
-
-// Run starts the Contact API server with observability, CORS, and graceful shutdown
-func Run() {
-	// Initialize structured logging
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
-
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		slog.Error("Failed to load configuration", "error", err)
-		os.Exit(1)
-	}
-
-	// Initialize OpenTelemetry
-	cleanup, err := observability.InitTracing("contact-api")
-	if err != nil {
-		slog.Error("Failed to initialize tracing", "error", err)
-		os.Exit(1)
-	}
-	defer cleanup()
-
-	// Set Gin mode
-	if os.Getenv("GIN_MODE") == "" {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
-	// Create Gin router
-	r := gin.New()
-
-	// Add middleware
-	r.Use(gin.Recovery())
-	r.Use(otelgin.Middleware("contact-api"))
-	r.Use(corsMiddleware())
-	r.Use(loggingMiddleware())
-
-	// Create API handlers
-	api := handlers.New(cfg)
-
-	// API routes
-	v1 := r.Group("/api/v1")
-	{
-		v1.POST("/contact/:website", api.ContactHandler)
-		v1.GET("/contact/:website/health", api.WebsiteHealthCheck)
-	}
-
-	// Global routes
-	r.GET("/health", api.HealthCheck)
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-
-	// Get port from environment variable or use default
-	port := cfg.Port
-	if port == "" {
-		port = "3002"
-	}
-
-	// Create server with timeouts
-	server := &http.Server{
-		Addr:         ":" + port,
-		Handler:      r,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-
-	// Start server in goroutine
-	go func() {
-		slog.Info("Starting Contact API server",
-			"port", port,
-			"smtp_host", cfg.SMTPHost,
-			"smtp_port", cfg.SMTPPort,
-		)
-
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("Server error", "error", err)
-			os.Exit(1)
+func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	if err := run(); err != nil {
+		for _, e := range flatten(err) {
+			slog.Error("startup failed", "error", e)
 		}
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	path := os.Getenv("CONFIG_FILE")
+	if path == "" {
+		path = defaultConfigPath
+	}
+
+	renderer, err := render.New(os.Getenv("TEMPLATES_DIR"))
+	if err != nil {
+		return fmt.Errorf("templates: %w", err)
+	}
+	cfg, err := config.Load(path, os.Getenv, renderer.Has)
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+
+	providers, err := mail.Build(cfg.Providers, map[string]mail.Factory{
+		"smtp": func(name string, c config.ProviderConfig) (mail.Provider, error) {
+			return smtp.New(name, c), nil
+		},
+		"resend": func(name string, c config.ProviderConfig) (mail.Provider, error) {
+			return resend.New(name, c.APIKey), nil
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("providers: %w", err)
+	}
+
+	shutdownTracing, err := observability.InitTracing(serviceName, sha)
+	if err != nil {
+		slog.Warn("tracing disabled", "error", err)
+		shutdownTracing = func() {}
+	}
+	defer shutdownTracing()
+
+	metrics := observability.NewMetrics(prometheus.DefaultRegisterer)
+	metrics.Preinit(cfg)
+
+	svc := &submit.Service{
+		Config: cfg, Providers: providers, Renderer: renderer,
+		Limiter:   guard.NewLimiter(time.Now),
+		Turnstile: guard.NewTurnstile(nil, ""),
+		Metrics:   metrics,
+		Log:       slog.Default(),
+	}
+
+	srv := &http.Server{
+		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler:      handlers.NewRouter(svc, cfg, handlers.BuildInfo{SHA: sha}),
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
+	}
+
+	return serve(srv)
+}
+
+// serve runs srv until it fails or the process is asked to stop.
+func serve(srv *http.Server) error {
+	errCh := make(chan error, 1)
+	go func() {
+		slog.Info("listening", "addr", srv.Addr, "sha", sha)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+		close(errCh)
 	}()
 
-	// Wait for interrupt signal for graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	slog.Info("Shutting down server...")
-
-	// Graceful shutdown with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		slog.Error("Server forced to shutdown", "error", err)
-		os.Exit(1)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("server: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
 	}
 
-	slog.Info("Server exited gracefully")
+	slog.Info("shutting down")
+	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutCtx); err != nil {
+		return fmt.Errorf("shutdown: %w", err)
+	}
+
+	return nil
 }
 
-// corsMiddleware provides CORS support for web forms
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
+// flatten splits an errors.Join result into its individual problems.
+func flatten(err error) []error {
+	var out []error
+	var walk func(error)
+	walk = func(e error) {
+		if j, ok := e.(interface{ Unwrap() []error }); ok { //nolint:errorlint // joined errors are not wrapped further
+			for _, c := range j.Unwrap() {
+				walk(c)
+			}
 			return
 		}
-
-		c.Next()
+		out = append(out, e)
 	}
-}
+	walk(err)
 
-// loggingMiddleware provides structured logging for requests
-func loggingMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		start := time.Now()
-		path := c.Request.URL.Path
-		raw := c.Request.URL.RawQuery
-
-		// Process request
-		c.Next()
-
-		// Log request details
-		latency := time.Since(start)
-		clientIP := c.ClientIP()
-		method := c.Request.Method
-		statusCode := c.Writer.Status()
-
-		if raw != "" {
-			path = path + "?" + raw
-		}
-
-		slog.Info("HTTP request",
-			"status", statusCode,
-			"method", method,
-			"path", path,
-			"ip", clientIP,
-			"latency", latency.String(),
-		)
-	}
-}
-
-//nolint:unused // This is used when running the package directly
-func main() {
-	// Only run when directly invoked
-	Run()
+	return out
 }

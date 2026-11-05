@@ -1,0 +1,41 @@
+# Dev config for docker-compose.yml: sends through the MailHog service (web UI on :8025).
+[provider.melee]
+type = "smtp"
+host = "mail-server"
+port = 1025
+tls  = "none"
+
+[defaults]
+provider = "melee"
+
+[site.example]
+from    = "Example <noreply@example.com>"
+to      = ["owner@example.com"]
+origins = ["https://example.com", "http://localhost:3002", "http://localhost"]
+
+[site.example.form.contact]
+subject = "New message from {{name}}"
+
+[[site.example.form.contact.fields]]
+name     = "name"
+label    = "Name"
+type     = "text"
+required = true
+
+[[site.example.form.contact.fields]]
+name     = "email"
+label    = "Email"
+type     = "email"
+required = true
+
+[[site.example.form.contact.fields]]
+name     = "subject"
+label    = "Subject"
+type     = "text"
+required = true
+
+[[site.example.form.contact.fields]]
+name     = "message"
+label    = "Message"
+type     = "textarea"
+required = true

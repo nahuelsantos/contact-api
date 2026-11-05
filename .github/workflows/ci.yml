@@ -1,40 +1,80 @@
-name: PR Validation
+name: CI
 
 on:
-  pull_request:
+  push:
     branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_REPO: ${{ vars.REGISTRY_HOST || 'registry.lab.staysy.co' }}:5000/release/contact-api
 
 jobs:
-  test-and-lint:
-    runs-on: ubuntu-latest
-    
+  lint-workflows:
+    # A workflow GitHub cannot parse runs no jobs at all, silently. Catch it here.
+    # Self-hosted runners on plunder (home-lab docs/runbooks/ci-runners.md): pull requests run in
+    # the contact-api-pr pool, pushes to main and manual runs in contact-api-release.
+    runs-on: ${{ github.event_name == 'pull_request' && 'contact-api-pr' || 'contact-api-release' }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck=
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.23'
-        cache: true
+  test:
+    runs-on: ${{ github.event_name == 'pull_request' && 'contact-api-pr' || 'contact-api-release' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Test
+        run: go test -race ./...
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.5.0
+          install-mode: goinstall
 
-    - name: Download dependencies
-      run: go mod download
-
-    - name: Run tests
-      run: go test -v -race -coverprofile=coverage.out ./...
-
-    - name: Run linter
-      uses: golangci/golangci-lint-action@v7
-      with:
-        version: v2.5.0
-        args: --timeout=5m
-
-    - name: Build
-      run: go build -o contact-api .
-
-    - name: Upload coverage
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.out
-        fail_ci_if_error: false 
+  image:
+    needs: test
+    # Builds the release image once. On main it is pushed as release/contact-api:sha-<sha>;
+    # cd-main.yml deploys exactly that digest.
+    runs-on: ${{ github.event_name == 'pull_request' && 'contact-api-pr' || 'contact-api-release' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build the image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          push: false
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: ${{ env.IMAGE_REPO }}:sha-${{ github.sha }}
+      - name: Image smoke (healthy, served, v2 route answers)
+        run: bash scripts/image-smoke.sh "${IMAGE_REPO}:sha-${{ github.sha }}"
+      - name: Log in to the registry (main only)
+        if: github.event_name != 'pull_request' && vars.REGISTRY_RELEASE_USER != ''
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ vars.REGISTRY_HOST || 'registry.lab.staysy.co' }}:5000
+          username: ${{ vars.REGISTRY_RELEASE_USER }}
+          password: ${{ secrets.REGISTRY_RELEASE_PASSWORD }}
+      - name: Push release/contact-api:sha-<sha> (main only)
+        if: github.event_name != 'pull_request' && vars.REGISTRY_RELEASE_USER != ''
+        run: docker push "${IMAGE_REPO}:sha-${{ github.sha }}"
+      - name: Push skipped
+        if: github.event_name != 'pull_request' && vars.REGISTRY_RELEASE_USER == ''
+        run: |
+          echo "::notice::Image not pushed: set REGISTRY_RELEASE_USER and REGISTRY_RELEASE_PASSWORD on the repo"

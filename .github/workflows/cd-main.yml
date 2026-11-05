@@ -1,0 +1,60 @@
+name: CD
+
+# After CI succeeds on main: deploy that commit's image to https://nahuelsantos.com/api through the melee
+# deploy gate (kind `contact-api`, UAT key). Off until the repo has CD_AUTO_DEPLOY=true; the
+# home-lab panel's site page sets it once the deploy secrets exist.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: cd-contact-api
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && vars.CD_AUTO_DEPLOY == 'true'
+    runs-on: contact-api-release
+    env:
+      IMAGE_REPO: ${{ vars.REGISTRY_HOST || 'registry.lab.staysy.co' }}:5000/release/contact-api
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      MELEE_HOST: ${{ vars.MELEE_DEPLOY_HOST || '192.168.3.8' }}
+      SITE_URL: ${{ vars.SITE_URL || 'https://nahuelsantos.com/api' }}
+    steps:
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ vars.REGISTRY_HOST || 'registry.lab.staysy.co' }}:5000
+          username: ${{ vars.REGISTRY_RELEASE_USER }}
+          password: ${{ secrets.REGISTRY_RELEASE_PASSWORD }}
+      - name: Resolve the digest CI pushed for this commit
+        id: ref
+        run: |
+          digest="$(crane digest "${IMAGE_REPO}:sha-${SHA}")" || { echo "no release/contact-api:sha-${SHA} in the registry (did CI push it?)" >&2; exit 1; }
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "deploying ${IMAGE_REPO}@${digest}"
+      - name: Deploy through the melee gate
+        env:
+          DEPLOY_KEY: ${{ secrets.MELEE_DEPLOY_UAT_KEY }}
+          KNOWN_HOSTS: ${{ vars.MELEE_SSH_KNOWN_HOSTS }}
+          DIGEST: ${{ steps.ref.outputs.digest }}
+        run: |
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > deploy.key
+          printf '%s\n' "$KNOWN_HOSTS" > known_hosts
+          ssh -i deploy.key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=known_hosts \
+              -o BatchMode=yes -o ConnectTimeout=15 "cideploy@${MELEE_HOST}" -- "contact-api ${IMAGE_REPO}@${DIGEST}"
+          rm -f deploy.key
+      # The gate proved the container is healthy; this proves visitors reach it through Cloudflare.
+      - name: Smoke test the public site
+        run: |
+          for _ in $(seq 1 10); do
+            [ "$(curl -fsS "$SITE_URL/healthz" || true)" = ok ] && break
+            sleep 3
+          done
+          [ "$(curl -fsS "$SITE_URL/healthz")" = ok ]
+          [ "$(curl -fsS "$SITE_URL/version.json")" = "{\"sha\":\"${SHA}\"}" ]
