@@ -10,7 +10,7 @@ help: ## Show this help message
 
 run: ## Run the application locally
 	@echo "Starting Contact API on port 3002..."
-	go run ./cmd/contact-api
+	CONFIG_FILE=config/example.toml go run ./cmd/contact-api
 
 test: ## Run linting and tests
 	@echo "Running linter..."
@@ -20,8 +20,8 @@ test: ## Run linting and tests
 
 start: ## Start with docker-compose
 	@echo "Starting Contact API with Docker..."
-	docker-compose -f docker-compose.dinky.yml up -d
+	docker-compose -f docker-compose.yml up -d
 
 stop: ## Stop docker-compose
 	@echo "Stopping Contact API..."
-	docker-compose -f docker-compose.dinky.yml down 
+	docker-compose -f docker-compose.yml down 

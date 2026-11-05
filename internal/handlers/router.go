@@ -18,6 +18,7 @@ import (
 	"github.com/nahuelsantos/contact-api/internal/forms"
 	"github.com/nahuelsantos/contact-api/internal/guard"
 	"github.com/nahuelsantos/contact-api/internal/submit"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
@@ -31,6 +32,22 @@ const (
 // BuildInfo describes the running build.
 type BuildInfo struct{ SHA string }
 
+// v1Body is the v0 JSON response, kept for the existing websites.
+type v1Body struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+const (
+	v1Form        = "contact"
+	v1MsgSent     = "Your message has been sent successfully! We will get back to you soon."
+	v1MsgInvalid  = "Invalid request format"
+	v1MsgFailed   = "Failed to send your message. Please try again later."
+	v1MsgOrigin   = "Origin not allowed"
+	v1MsgNotFound = "Unknown website"
+	v1MsgRate     = "Too many requests. Please try again later."
+)
+
 // body is the v2 JSON response.
 type body struct {
 	OK     bool              `json:"ok"`
@@ -39,7 +56,7 @@ type body struct {
 }
 
 // NewRouter builds the HTTP router.
-func NewRouter(svc *submit.Service, cfg *config.Config, _ BuildInfo) *gin.Engine {
+func NewRouter(svc *submit.Service, cfg *config.Config, info BuildInfo) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	log := svc.Log
 	if log == nil {
@@ -47,11 +64,22 @@ func NewRouter(svc *submit.Service, cfg *config.Config, _ BuildInfo) *gin.Engine
 	}
 
 	r := gin.New()
-	r.Use(otelgin.Middleware(serviceName), gin.Recovery(), requestLog(log))
+	// requestLog sits outside Recovery so a recovered panic is still logged.
+	r.Use(otelgin.Middleware(serviceName), requestLog(log), gin.Recovery())
 
 	h := &v2{svc: svc, cfg: cfg}
 	r.POST("/api/v2/sites/:site/forms/:form", h.submit)
 	r.OPTIONS("/api/v2/sites/:site/forms/:form", h.preflight)
+	r.POST("/api/v1/contact/:website", h.v1)
+
+	healthz := func(c *gin.Context) { c.String(http.StatusOK, "ok") }
+	version := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"sha": info.SHA}) }
+	r.GET("/healthz", healthz)
+	r.GET("/api/healthz", healthz)
+	r.GET("/version.json", version)
+	r.GET("/api/version.json", version)
+	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	return r
 }
@@ -143,6 +171,39 @@ func (h *v2) submit(c *gin.Context) {
 		c.JSON(http.StatusTooManyRequests, body{Error: "rate_limited"})
 	case submit.SendFailed:
 		c.JSON(http.StatusBadGateway, body{Error: "send_failed"})
+	}
+}
+
+// v1 serves the v0 endpoint as form "contact" of the named site (JSON only).
+func (h *v2) v1(c *gin.Context) {
+	fields := map[string]string{}
+	if mt, _, _ := mime.ParseMediaType(c.GetHeader("Content-Type")); mt == contentJSON {
+		limit := int64(h.cfg.Server.MaxBodyKB) * bytesPerKB
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+		fields, _ = readFields(c.Request.Body, mt) // a bad body is an empty submission
+	}
+
+	res := h.svc.Submit(c.Request.Context(), submit.Request{
+		Site: c.Param("website"), Form: v1Form,
+		Origin: guard.RequestOrigin(c.Request), ClientIP: guard.ClientIP(c.Request),
+		Fields: fields,
+	})
+
+	switch res.Outcome {
+	case submit.Sent, submit.Spam:
+		c.JSON(http.StatusOK, v1Body{Success: true, Message: v1MsgSent})
+	case submit.Invalid:
+		c.JSON(http.StatusBadRequest, v1Body{Message: v1MsgInvalid})
+	case submit.Forbidden:
+		c.JSON(http.StatusForbidden, v1Body{Message: v1MsgOrigin})
+	case submit.NotFound:
+		c.JSON(http.StatusNotFound, v1Body{Message: v1MsgNotFound})
+	case submit.RateLimited:
+		secs := max(int(math.Ceil(res.RetryAfter.Seconds())), 1)
+		c.Header("Retry-After", strconv.Itoa(secs))
+		c.JSON(http.StatusTooManyRequests, v1Body{Message: v1MsgRate})
+	case submit.SendFailed:
+		c.JSON(http.StatusInternalServerError, v1Body{Message: v1MsgFailed})
 	}
 }
 

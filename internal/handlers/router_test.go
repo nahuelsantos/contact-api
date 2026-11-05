@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/nahuelsantos/contact-api/internal/config"
 	"github.com/nahuelsantos/contact-api/internal/guard"
 	"github.com/nahuelsantos/contact-api/internal/handlers"
@@ -47,10 +49,17 @@ func (f *fakeProvider) Send(_ context.Context, m mail.Message) error {
 
 type rig struct {
 	h    http.Handler
+	eng  *gin.Engine
 	prov *fakeProvider
 }
 
 func newRig(t *testing.T) *rig {
+	t.Helper()
+
+	return newRigWith(t, slog.New(slog.NewTextHandler(io.Discard, nil)), "x")
+}
+
+func newRigWith(t *testing.T, log *slog.Logger, sha string) *rig {
 	t.Helper()
 	cfg := &config.Config{
 		Server:   config.Server{MaxBodyKB: 64},
@@ -74,10 +83,11 @@ func newRig(t *testing.T) *rig {
 	svc := &submit.Service{
 		Config: cfg, Providers: map[string]mail.Provider{"main": prov}, Renderer: rd,
 		Limiter: guard.NewLimiter(time.Now), Metrics: observability.NewMetrics(prometheus.NewRegistry()),
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log: log, Turnstile: guard.NewTurnstile(nil, ""),
 	}
+	eng := handlers.NewRouter(svc, cfg, handlers.BuildInfo{SHA: sha})
 
-	return &rig{h: handlers.NewRouter(svc, cfg, handlers.BuildInfo{SHA: "x"}), prov: prov}
+	return &rig{h: eng, eng: eng, prov: prov}
 }
 
 func (r *rig) do(method, p, ctype, org, payload string) *httptest.ResponseRecorder {
@@ -214,5 +224,113 @@ func TestV2_CORSPreflight(t *testing.T) {
 		if rec.Code != 204 || rec.Header().Get("Access-Control-Allow-Origin") != "" {
 			t.Fatalf("%s: status %d, ACAO %q", p, rec.Code, rec.Header().Get("Access-Control-Allow-Origin"))
 		}
+	}
+}
+
+const (
+	v1Path = "/api/v1/contact/example"
+	v1JSON = `{"name":"Ana","email":"ana@example.com","subject":"Hi","message":"Hola"}`
+	v1OK   = `{"success":true,"message":"Your message has been sent successfully! We will get back to you soon."}`
+)
+
+func TestV1_Compatible(t *testing.T) {
+	r := newRig(t)
+	rec := r.do(http.MethodPost, v1Path, "application/json", origin, v1JSON)
+	assertBody(t, rec, 200, v1OK)
+	if len(r.prov.sent) != 1 {
+		t.Fatalf("sent = %d, want 1", len(r.prov.sent))
+	}
+	if m := r.prov.sent[0]; m.ReplyTo != "ana@example.com" || m.From != "noreply@example.com" {
+		t.Fatalf("message = %+v", m)
+	}
+}
+
+func TestV1_SpamLooksLikeSuccess(t *testing.T) {
+	r := newRig(t)
+	rec := r.do(http.MethodPost, v1Path, "application/json", origin,
+		`{"name":"Ana","email":"ana@example.com","message":"Hola","_gotcha":"x"}`)
+	assertBody(t, rec, 200, v1OK)
+	if len(r.prov.sent) != 0 {
+		t.Fatal("spam was delivered")
+	}
+}
+
+func TestV1_Errors(t *testing.T) {
+	t.Run("invalid", func(t *testing.T) {
+		rec := newRig(t).do(http.MethodPost, v1Path, "application/json", origin, `{"name":"Ana"}`)
+		assertBody(t, rec, 400, `{"success":false,"message":"Invalid request format"}`)
+	})
+	t.Run("send failed", func(t *testing.T) {
+		r := newRig(t)
+		r.prov.err = errBoom
+		rec := r.do(http.MethodPost, v1Path, "application/json", origin, v1JSON)
+		assertBody(t, rec, 500, `{"success":false,"message":"Failed to send your message. Please try again later."}`)
+	})
+	t.Run("forbidden", func(t *testing.T) {
+		rec := newRig(t).do(http.MethodPost, v1Path, "application/json", "https://evil.example", v1JSON)
+		assertBody(t, rec, 403, `{"success":false,"message":"Origin not allowed"}`)
+	})
+	t.Run("not found", func(t *testing.T) {
+		rec := newRig(t).do(http.MethodPost, "/api/v1/contact/nope", "application/json", origin, v1JSON)
+		assertBody(t, rec, 404, `{"success":false,"message":"Unknown website"}`)
+	})
+	t.Run("rate limited", func(t *testing.T) {
+		r := newRig(t)
+		var rec *httptest.ResponseRecorder
+		for range 6 {
+			rec = r.do(http.MethodPost, v1Path, "application/json", origin, v1JSON)
+		}
+		assertBody(t, rec, 429, `{"success":false,"message":"Too many requests. Please try again later."}`)
+		if rec.Header().Get("Retry-After") == "" {
+			t.Fatal("missing Retry-After")
+		}
+	})
+	t.Run("not json", func(t *testing.T) {
+		rec := newRig(t).do(http.MethodPost, v1Path, "text/plain", origin, v1JSON)
+		assertBody(t, rec, 400, `{"success":false,"message":"Invalid request format"}`)
+	})
+}
+
+func TestV1_RequiresOrigin(t *testing.T) {
+	rec := newRig(t).do(http.MethodPost, v1Path, "application/json", "", v1JSON)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestHealthAndVersion(t *testing.T) {
+	r := newRigWith(t, slog.New(slog.NewTextHandler(io.Discard, nil)), "abc")
+	for _, p := range []string{"/healthz", "/api/healthz"} {
+		rec := r.do(http.MethodGet, p, "", "", "")
+		assertBody(t, rec, 200, "ok")
+		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+			t.Fatalf("%s content-type = %q", p, ct)
+		}
+	}
+	for _, p := range []string{"/version.json", "/api/version.json"} {
+		assertBody(t, r.do(http.MethodGet, p, "", "", ""), 200, `{"sha":"abc"}`)
+	}
+	assertBody(t, r.do(http.MethodGet, "/health", "", "", ""), 200, `{"status":"ok"}`)
+	if rec := r.do(http.MethodGet, "/metrics", "", "", ""); rec.Code != 200 {
+		t.Fatalf("/metrics = %d", rec.Code)
+	}
+	for _, p := range []string{"/swagger/index.html", "/api/v1/contact/example/health"} {
+		if rec := r.do(http.MethodGet, p, "", "", ""); rec.Code != 404 {
+			t.Fatalf("%s = %d, want 404", p, rec.Code)
+		}
+	}
+}
+
+func TestPanicStillLogged(t *testing.T) {
+	var buf bytes.Buffer
+	r := newRigWith(t, slog.New(slog.NewTextHandler(&buf, nil)), "x")
+	r.eng.GET("/boom", func(*gin.Context) { panic("kaboom") })
+	rec := r.do(http.MethodGet, "/boom", "", "", "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], "status=500") || !strings.Contains(lines[0], "route=/boom") {
+		t.Fatalf("log lines = %q", lines)
 	}
 }
