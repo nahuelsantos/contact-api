@@ -22,6 +22,9 @@ import (
 	"github.com/nahuelsantos/contact-api/internal/render"
 	"github.com/nahuelsantos/contact-api/internal/submit"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 const (
@@ -377,12 +380,65 @@ func TestPanicStillLogged(t *testing.T) {
 	var buf bytes.Buffer
 	r := newRigWith(t, slog.New(slog.NewTextHandler(&buf, nil)), "x")
 	r.eng.GET("/boom", func(*gin.Context) { panic("kaboom") })
-	rec := r.do(http.MethodGet, "/boom", "", "", "")
+	req := httptest.NewRequest(http.MethodGet, "/boom", nil)
+	req.Header.Set("Cookie", "CF_Authorization=SECRET-COOKIE-7731")
+	req.Header.Set("Authorization", "Bearer SECRET-TOKEN-7731")
+	rec := httptest.NewRecorder()
+	r.h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != 1 || !strings.Contains(lines[0], "status=500") || !strings.Contains(lines[0], "route=/boom") {
+	if len(lines) != 1 || !strings.Contains(lines[0], "status=500") || !strings.Contains(lines[0], "route=/boom") ||
+		!strings.Contains(lines[0], "kaboom") {
 		t.Fatalf("log lines = %q", lines)
+	}
+	for _, secret := range []string{"SECRET-COOKIE-7731", "SECRET-TOKEN-7731", "CF_Authorization"} {
+		if strings.Contains(buf.String(), secret) {
+			t.Fatalf("panic log leaks %q: %s", secret, buf.String())
+		}
+	}
+}
+
+func TestClientIPIgnoresForwardedHeaders(t *testing.T) {
+	r := newRig(t)
+	r.eng.GET("/ip", func(c *gin.Context) { c.String(http.StatusOK, c.ClientIP()) })
+	req := httptest.NewRequest(http.MethodGet, "/ip", nil)
+	req.RemoteAddr = "10.0.0.5:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req.Header.Set("X-Real-Ip", "203.0.113.9")
+	rec := httptest.NewRecorder()
+	r.h.ServeHTTP(rec, req)
+	if got := rec.Body.String(); got != "10.0.0.5" {
+		t.Fatalf("ClientIP = %q, want the peer (no trusted proxies)", got)
+	}
+}
+
+func TestSpansCarryNoVisitorAddressOrUserAgent(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+
+	r := newRig(t)
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(goodJSON))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", origin)
+	req.Header.Set("User-Agent", "VisitorAgent/7731")
+	req.Header.Set("X-Forwarded-For", "203.0.113.77")
+	r.h.ServeHTTP(httptest.NewRecorder(), req)
+
+	spans := rec.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d", len(spans))
+	}
+	for _, kv := range spans[0].Attributes() {
+		switch kv.Key {
+		case "client.address", "user_agent.original", "network.peer.address":
+			t.Errorf("span carries %s=%s", kv.Key, kv.Value.String())
+		}
+		if v := kv.Value.String(); strings.Contains(v, "203.0.113.77") || strings.Contains(v, "VisitorAgent") {
+			t.Errorf("span leaks visitor data in %s=%s", kv.Key, v)
+		}
 	}
 }

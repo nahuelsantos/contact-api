@@ -123,6 +123,11 @@ a send. The notification chain is bounded at 25 s and the auto-reply at 20 s.
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Enables OTLP/HTTP tracing when set |
 | `OTEL_SERVICE_NAME` | Trace service name (`contact-api`) |
 
+Spans carry the build sha as `service.version` and never the visitor's
+address or user agent (`client.address`, `user_agent.original` and the
+`network.peer.*` attributes are dropped at span start). `X-Forwarded-For` is
+never trusted, and a recovered panic is logged without request headers.
+
 Copy `.env.example` to `.env` for local use.
 
 ## Development

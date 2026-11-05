@@ -478,7 +478,7 @@ func (b *blockingProvider) Send(ctx context.Context, _ mail.Message) error {
 	b.once.Do(func() { close(b.started) })
 	<-b.release
 	if err := ctx.Err(); err != nil {
-		return err
+		return err //nolint:wrapcheck // test double passes the context error through
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()

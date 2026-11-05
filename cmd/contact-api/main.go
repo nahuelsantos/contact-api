@@ -75,7 +75,7 @@ func run() error {
 		return fmt.Errorf("providers: %w", err)
 	}
 
-	shutdownTracing, err := observability.InitTracing(serviceName)
+	shutdownTracing, err := observability.InitTracing(serviceName, sha)
 	if err != nil {
 		slog.Warn("tracing disabled", "error", err)
 		shutdownTracing = func() {}

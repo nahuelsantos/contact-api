@@ -4,6 +4,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -17,9 +18,11 @@ import (
 	"github.com/nahuelsantos/contact-api/internal/config"
 	"github.com/nahuelsantos/contact-api/internal/forms"
 	"github.com/nahuelsantos/contact-api/internal/guard"
+	"github.com/nahuelsantos/contact-api/internal/observability"
 	"github.com/nahuelsantos/contact-api/internal/submit"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	"go.opentelemetry.io/otel"
 )
 
 const (
@@ -64,8 +67,17 @@ func NewRouter(svc *submit.Service, cfg *config.Config, info BuildInfo) *gin.Eng
 	}
 
 	r := gin.New()
-	// requestLog sits outside Recovery so a recovered panic is still logged.
-	r.Use(otelgin.Middleware(serviceName), requestLog(log), gin.Recovery())
+	// Never trust X-Forwarded-For for c.ClientIP(); the visitor IP comes
+	// only from guard.ClientIP, where the spec allows it in 403/429 logs.
+	_ = r.SetTrustedProxies(nil) // nil never fails
+	// requestLog sits outside recovery so a recovered panic is still logged,
+	// on the same single line.
+	r.Use(
+		otelgin.Middleware(serviceName,
+			otelgin.WithTracerProvider(observability.RedactingTracerProvider(otel.GetTracerProvider()))),
+		requestLog(log),
+		gin.CustomRecoveryWithWriter(io.Discard, recovered),
+	)
 
 	h := &v2{svc: svc, cfg: cfg}
 	r.POST("/api/v2/sites/:site/forms/:form", h.submit)
@@ -85,7 +97,18 @@ func NewRouter(svc *submit.Service, cfg *config.Config, info BuildInfo) *gin.Eng
 	return r
 }
 
-// requestLog logs method, route template, status and latency only.
+const panicKey = "contact-api/panic"
+
+// recovered answers 500 and hands the panic to requestLog. gin's default
+// Recovery would print the request headers (Cookie, CF_Authorization);
+// io.Discard swallows gin's own output.
+func recovered(c *gin.Context, err any) {
+	c.Set(panicKey, fmt.Sprint(err))
+	c.AbortWithStatus(http.StatusInternalServerError)
+}
+
+// requestLog logs method, route template, status and latency only, plus the
+// panic value (never request headers) when a handler panicked.
 func requestLog(log *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -94,12 +117,18 @@ func requestLog(log *slog.Logger) gin.HandlerFunc {
 		if route == "" {
 			route = "unmatched"
 		}
-		log.LogAttrs(c.Request.Context(), slog.LevelInfo, "request",
+		attrs := []slog.Attr{
 			slog.String("method", c.Request.Method),
 			slog.String("route", route),
 			slog.Int("status", c.Writer.Status()),
 			slog.Duration("latency", time.Since(start)),
-		)
+		}
+		level := slog.LevelInfo
+		if p, ok := c.Get(panicKey); ok {
+			level = slog.LevelError
+			attrs = append(attrs, slog.Any("panic", p))
+		}
+		log.LogAttrs(c.Request.Context(), level, "request", attrs...)
 	}
 }
 
