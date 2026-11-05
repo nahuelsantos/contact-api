@@ -86,6 +86,11 @@ func (p *Provider) Send(ctx context.Context, m mail.Message) error {
 	if err != nil {
 		return fmt.Errorf("%w: from", ErrAddress)
 	}
+	if m.ReplyTo != "" {
+		if _, err := stdmail.ParseAddress(m.ReplyTo); err != nil {
+			return fmt.Errorf("%w: reply-to", ErrAddress)
+		}
+	}
 	if len(m.To) == 0 {
 		return ErrNoRecipients
 	}
@@ -174,9 +179,9 @@ func (p *Provider) deliver(ctx context.Context, deadline time.Time, from string,
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("smtp: end data: %w", err)
 	}
-	if err := c.Quit(); err != nil {
-		return fmt.Errorf("smtp: quit: %w", err)
-	}
+	// The server has accepted the message; a failing QUIT must not turn a
+	// delivered message into an error (it would trigger a duplicate send).
+	_ = c.Quit()
 	return nil
 }
 
@@ -197,18 +202,19 @@ func oneLine(s string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
 }
 
-// addrHeader renders an address (or list) with RFC 2047-encoded display names.
+// addrHeader renders addresses with RFC 2047-encoded display names. Values
+// that do not parse as a single address are dropped, never passed through.
 func addrHeader(raw ...string) string {
 	out := make([]string, 0, len(raw))
 	for _, r := range raw {
-		if a, err := stdmail.ParseAddress(r); err == nil {
-			if a.Name == "" {
-				out = append(out, a.Address)
-			} else {
-				out = append(out, a.String())
-			}
+		a, err := stdmail.ParseAddress(r)
+		if err != nil {
+			continue
+		}
+		if a.Name == "" {
+			out = append(out, a.Address)
 		} else {
-			out = append(out, oneLine(r))
+			out = append(out, a.String())
 		}
 	}
 	return strings.Join(out, ", ")
@@ -238,8 +244,8 @@ func BuildMIME(m mail.Message, now time.Time, messageID string) []byte {
 	hdr := func(k, v string) { out.WriteString(k + ": " + v + "\r\n") }
 	hdr("From", addrHeader(m.From))
 	hdr("To", addrHeader(m.To...))
-	if m.ReplyTo != "" {
-		hdr("Reply-To", addrHeader(m.ReplyTo))
+	if rt := addrHeader(m.ReplyTo); rt != "" {
+		hdr("Reply-To", rt)
 	}
 	hdr("Subject", mime.QEncoding.Encode("UTF-8", oneLine(m.Subject)))
 	hdr("Date", now.Format(time.RFC1123Z))

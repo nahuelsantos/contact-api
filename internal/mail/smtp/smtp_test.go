@@ -1,6 +1,7 @@
 package smtp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ecdsa"
@@ -156,9 +157,10 @@ type received struct {
 }
 
 type testBackend struct {
-	mu       sync.Mutex
-	got      []received
-	wantAuth bool
+	insecureAuth bool
+	mu           sync.Mutex
+	got          []received
+	wantAuth     bool
 }
 
 func (b *testBackend) NewSession(*gosmtp.Conn) (gosmtp.Session, error) {
@@ -226,6 +228,7 @@ func startServer(t *testing.T, b *testBackend, tlsCfg *tls.Config, implicit bool
 	srv := gosmtp.NewServer(b)
 	srv.Domain = "localhost"
 	srv.TLSConfig = tlsCfg
+	srv.AllowInsecureAuth = b.insecureAuth
 	srv.ReadTimeout, srv.WriteTimeout = 5*time.Second, 5*time.Second
 	ln := listen(t)
 	if implicit {
@@ -397,5 +400,99 @@ func TestSend_ContextDeadlineShorterThanDefault(t *testing.T) {
 	}
 	if d := time.Since(start); d > 3*time.Second {
 		t.Errorf("took %v", d)
+	}
+}
+
+func TestSend_PlainWithAuthOnLocalhost(t *testing.T) {
+	b := &testBackend{wantAuth: true, insecureAuth: true}
+	host, port := startServer(t, b, nil, false)
+	p := New("melee", config.ProviderConfig{Host: host, Port: port, Username: "u", Password: "p"})
+	if err := p.Send(context.Background(), sampleMessage()); err != nil {
+		t.Fatal(err)
+	}
+	if r := checkDelivered(t, b); r.user != "u" {
+		t.Errorf("user = %q", r.user)
+	}
+}
+
+func TestSend_QuitFailureAfterAcceptanceIsSuccess(t *testing.T) {
+	ln := listen(t)
+	defer func() { _ = ln.Close() }()
+	accepted := make(chan struct{})
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = c.Close() }()
+		r := bufio.NewReader(c)
+		say := func(s string) { _, _ = io.WriteString(c, s+"\r\n") }
+		say("220 fake ESMTP")
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			switch strings.ToUpper(strings.TrimSpace(line))[:4] {
+			case "EHLO":
+				say("250 fake")
+			case "MAIL", "RCPT":
+				say("250 ok")
+			case "DATA":
+				say("354 go")
+				for {
+					l, err := r.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if l == ".\r\n" {
+						break
+					}
+				}
+				say("250 queued")
+				close(accepted)
+			case "QUIT":
+				return // drop without 221
+			default:
+				say("500 what")
+			}
+		}
+	}()
+	a := ln.Addr().(*net.TCPAddr)
+	p := New("fake", config.ProviderConfig{Host: "127.0.0.1", Port: a.Port})
+	if err := p.Send(context.Background(), sampleMessage()); err != nil {
+		t.Fatalf("Send = %v, want nil after server acceptance", err)
+	}
+	select {
+	case <-accepted:
+	default:
+		t.Error("server never accepted the message")
+	}
+}
+
+func TestSend_InvalidReplyToRejectedBeforeSending(t *testing.T) {
+	for _, rt := range []string{"a@x.com, evil@y.com", "a@x.com\r\nBcc: evil@y.com", "bad\xffaddr@x.com", "nonsense"} {
+		b := &testBackend{}
+		host, port := startServer(t, b, nil, false)
+		p := New("x", config.ProviderConfig{Host: host, Port: port})
+		m := sampleMessage()
+		m.ReplyTo = rt
+		if err := p.Send(context.Background(), m); !errors.Is(err, ErrAddress) {
+			t.Errorf("ReplyTo %q: err = %v, want ErrAddress", rt, err)
+		}
+		b.mu.Lock()
+		n := len(b.got)
+		b.mu.Unlock()
+		if n != 0 {
+			t.Errorf("ReplyTo %q: %d messages sent", rt, n)
+		}
+	}
+}
+
+func TestBuildMIME_OmitsUnparseableReplyTo(t *testing.T) {
+	m := sampleMessage()
+	m.ReplyTo = "a@x.com, evil@y.com"
+	if raw := string(BuildMIME(m, testNow, "<a@b>")); strings.Contains(raw, "Reply-To") || strings.Contains(raw, "evil") {
+		t.Errorf("unparseable Reply-To emitted:\n%s", raw)
 	}
 }
