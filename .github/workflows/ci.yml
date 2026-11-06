@@ -6,7 +6,7 @@ on:
 
 jobs:
   test-and-lint:
-    runs-on: ubuntu-latest
+    runs-on: contact-api-pr
     
     steps:
     - name: Checkout code
