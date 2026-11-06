@@ -1,0 +1,7 @@
+# The homelab runner pools (home-lab scripts/plunder/14-setup-ci-runners.sh,
+# docs/runbooks/ci-runners.md): pull requests run in contact-api-pr; pushes to the
+# default branch, tags, schedules and dispatches in contact-api-release.
+self-hosted-runner:
+  labels:
+    - contact-api-pr
+    - contact-api-release
